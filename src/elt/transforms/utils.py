@@ -57,6 +57,39 @@ def get_id_mappings(db, id_field_map, collection_names):
     return mappings
 
 
+def get_name_mappings(db, name_field_map, name_field_lookup, collection_names):
+    """
+    Fetches custom IDs and their corresponding names from specified collections
+    and returns a dictionary of mappings.
+    """
+    mappings = {}
+    for name in collection_names:
+        collection = db[name]
+        try:
+            id_field = name_field_map.get(name) or name + "_id"
+            name_field = name_field_lookup.get(name, f"{name.rstrip('s')}_name")
+            
+            # Fetch all documents in a single query
+            cursor = collection.find({}, {id_field: 1, name_field: 1})
+            
+            # Build the mapping in memory
+            name_mapping = {
+                doc[id_field]: doc[name_field]
+                for doc in cursor
+                if id_field in doc and name_field in doc
+            }
+            
+            mappings[name] = name_mapping
+            logger.info(f"Created name mapping for '{name}' collection.")
+        except (ConnectionFailure, ConfigurationError) as e:
+            logger.warning(f"Could not create name mapping for '{name}': {e}")
+            mappings[name] = {}
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning(f"Unexpected error while creating name mapping for '{name}': {e}")
+            mappings[name] = {}
+    return mappings
+
+
 def parse_multi_value_field(id_mappings, field_string, collection_name):
     """
     Parses a comma-separated string of IDs and converts them into a list of
