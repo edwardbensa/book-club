@@ -1,6 +1,6 @@
 # Import modules
 from loguru import logger
-from src.elt.transforms.utils import connect_mongodb, get_id_mappings, parse_multi_value_field
+from src.elt.utils import connect_mongodb, get_id_mappings, parse_multi_value_field
 
 
 # Connect to MongoDB

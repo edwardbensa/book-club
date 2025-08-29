@@ -1,9 +1,16 @@
 # Import necessary modules
+import os
 from azure.storage.blob import BlobServiceClient
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ConfigurationError
 from loguru import logger
-from src.secrets.secrets import mongodb_uri, azure_storage_connection_string
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
+
+mongodb_uri = os.getenv("MONGODB_URI")
+azure_storage_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 
 
 def connect_mongodb():
@@ -25,7 +32,7 @@ def connect_azure_blob():
     Connects to Azure Blob Storage and returns the BlobServiceClient.
     """
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(azure_storage_connection_string)
+        blob_service_client = BlobServiceClient.from_connection_string(azure_storage_connection_string) # type: ignore
         logger.info("Successfully connected to Azure Blob Storage.")
         return blob_service_client
     except (ConnectionFailure, ConfigurationError) as e:

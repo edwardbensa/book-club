@@ -2,7 +2,7 @@
 import re
 from datetime import datetime
 from loguru import logger
-from src.elt.transforms.utils import connect_mongodb, get_id_mappings
+from src.elt.utils import connect_mongodb, get_id_mappings
 
 
 # Connect to MongoDB

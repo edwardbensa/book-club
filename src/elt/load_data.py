@@ -1,9 +1,14 @@
 # Import modules
+import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import load_dotenv
 from loguru import logger
-from src.secrets.secrets import gsheet_cred
-from src.elt.transforms.utils import connect_mongodb
+from src.elt.utils import connect_mongodb
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
+gsheet_cred = os.getenv("GSHEET_CRED")
 
 
 # Google Sheets authorisation

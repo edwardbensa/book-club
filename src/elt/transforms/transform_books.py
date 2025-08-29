@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from pymongo.errors import ConnectionFailure, ConfigurationError
 from loguru import logger
-from src.elt.transforms.utils import connect_mongodb
+from src.elt.utils import connect_mongodb
 
 # Connect to MongoDB
 db, client = connect_mongodb()
