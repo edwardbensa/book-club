@@ -1,6 +1,6 @@
 # Import modules
 from loguru import logger
-from src.elt.transforms.utils import connect_mongodb, remove_custom_ids
+from src.elt.transforms.utils import connect_mongodb, remove_custom_ids, change_id_field
 
 # Connect to MongoDB
 db, client = connect_mongodb()
@@ -11,13 +11,10 @@ collections_to_cleanup = {
     "award_categories": "acategory_id",
     "award_statuses": "astatus_id",
     "cover_art": "cart_id",
-    "formats": "format_id",
     "genres": "genre_id",
-    "languages": "language_id",
     "publishers": "publisher_id",
     "tags": "tag_id",
     "users": "user_id",
-    "read_statuses": "rstatus_id",
 }
 
 for collection_name, id_field in collections_to_cleanup.items():
@@ -29,6 +26,24 @@ for collection_name, id_field in collections_to_cleanup.items():
 
     # Log the completion of the cleanup
     logger.success(f"Cleanup completed for '{collection_name}' collection.")
+
+# Modify id_fields to use custom string IDs
+collections_to_modify = {
+    "formats": "format_id",
+    "languages": "language_id",
+    "creator_roles": "cr_id",
+    "read_statuses": "rstatus_id",
+}
+
+for collection_name, id_field in collections_to_modify.items():
+    collection = db[collection_name]
+    logger.info(f"Modifying IDs for '{collection_name}' collection...")
+
+    # Update documents to use custom string IDs
+    change_id_field(db, collection_name, id_field)
+
+    # Log the completion of the modification
+    logger.success(f"ID modification completed for '{collection_name}' collection.")
 
 
 # Cleanup for the 'award_categories' collection

@@ -68,17 +68,17 @@ def get_name_mappings(db, name_field_map, name_field_lookup, collection_names):
         try:
             id_field = name_field_map.get(name) or name + "_id"
             name_field = name_field_lookup.get(name, f"{name.rstrip('s')}_name")
-            
+
             # Fetch all documents in a single query
             cursor = collection.find({}, {id_field: 1, name_field: 1})
-            
+
             # Build the mapping in memory
             name_mapping = {
                 doc[id_field]: doc[name_field]
                 for doc in cursor
                 if id_field in doc and name_field in doc
             }
-            
+
             mappings[name] = name_mapping
             logger.info(f"Created name mapping for '{name}' collection.")
         except (ConnectionFailure, ConfigurationError) as e:
@@ -117,3 +117,27 @@ def remove_custom_ids(db, collection_name, custom_id_field):
         logger.success(f"Removed '{custom_id_field}' field from all documents in '{collection_name}'.")
     except (KeyError, TypeError, ValueError) as e:
         logger.error(f"Failed to remove '{custom_id_field}' field from '{collection_name}': {e}")
+
+def change_id_field(db, collection_name, custom_id_field):
+    """
+    Replaces the MongoDB _id field with the value from custom_id_field.
+    """
+    try:
+        collection = db[collection_name]
+        for doc in collection.find():
+            if custom_id_field in doc:
+                new_id = str(doc[custom_id_field])
+                # Prepare new document with new _id
+                new_doc = doc.copy()
+                new_doc["_id"] = new_id
+                del new_doc[custom_id_field]
+
+                try:
+                    collection.insert_one(new_doc)
+                    collection.delete_one({"_id": doc["_id"]})
+                    logger.debug(f"Replaced _id of document {doc['_id']} with '{new_id}' in '{collection_name}'")
+                except (KeyError, TypeError, ValueError) as insert_err:
+                    logger.error(f"Failed to insert new document with _id '{new_id}': {insert_err}")
+        logger.success(f"Object ID replacement completed for '{collection_name}' collection.")
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Failed to process collection '{collection_name}': {e}")

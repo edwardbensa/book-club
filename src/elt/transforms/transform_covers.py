@@ -2,10 +2,11 @@
 import os
 from urllib.parse import urlparse
 import shutil
+from typing import Tuple
 import requests
 from loguru import logger
 from bson.objectid import ObjectId
-from azure.core.exceptions import AzureError
+from azure.core.exceptions import AzureError, ResourceNotFoundError
 from src.elt.transforms.utils import connect_mongodb, connect_azure_blob
 from src.config import COVER_ART_DIR
 
@@ -42,7 +43,7 @@ db, client = connect_mongodb()
 blob_service_client = connect_azure_blob()
 
 # Define the container name where you upload and retrieve images
-CONTAINER_NAME = "cover-art"
+CONTAINER_NAME = 'cover-art'
 
 # Download, upload, and update image URLs in Azure Blob Storage
 
@@ -92,7 +93,7 @@ def download_images():
         except IOError as e:
             logger.error(f"Failed to save file {file_path}: {e}")
 
-def delete_container_contents(container_name):
+def delete_container_contents1(container_name):
     """
     Deletes all blobs from the specified Azure Blob Storage container.
     """
@@ -117,6 +118,76 @@ def delete_container_contents(container_name):
         logger.error(f"Failed to delete blobs from container '{container_name}': {e}")
         # The script should not proceed if this critical step fails
         exit()
+
+def delete_container_contents(container_name: str,raise_on_error: bool = True) -> Tuple[bool, int]:
+    """
+    Deletes all blobs from the specified Azure Blob Storage container.
+    
+    Args:
+        container_name: Name of the container to clear
+        raise_on_error: Whether to raise exceptions or return error status
+        
+    Returns:
+        Tuple of (success: bool, deleted_count: int)
+        
+    Raises:
+        AzureError: If raise_on_error is True and deletion fails
+        ValueError: If container_name is empty or None
+    """
+    if not container_name or not container_name.strip():
+        raise ValueError("Container name cannot be empty or None")
+
+    deleted_count = 0
+
+    try:
+        container_client = blob_service_client.get_container_client(container_name)
+
+        # Check if container exists
+        if not container_client.exists():
+            logger.warning(f"Container '{container_name}' does not exist")
+            return False, 0
+
+        logger.info(f"Starting deletion of blobs from container '{container_name}'...")
+
+        # Get blob list iterator (more memory efficient)
+        blob_pages = container_client.list_blobs().by_page()
+
+        for page in blob_pages:
+            batch_blobs = list(page)
+            if not batch_blobs:
+                break
+
+            logger.debug(f"Processing batch of {len(batch_blobs)} blobs")
+
+            # Delete blobs in current batch
+            for blob in batch_blobs:
+                try:
+                    container_client.delete_blob(blob.name, delete_snapshots="include")
+                    deleted_count += 1
+                    logger.debug(f"Deleted blob: {blob.name}")
+                except ResourceNotFoundError:
+                    # Blob might have been deleted by another process
+                    logger.debug(f"Blob already deleted: {blob.name}")
+                except AzureError as blob_error:
+                    logger.error(f"Failed to delete blob '{blob.name}': {blob_error}")
+                    if raise_on_error:
+                        raise
+
+        if deleted_count > 0:
+            logger.info(f"Successfully deleted {deleted_count} blobs from container '{container_name}'")
+        else:
+            logger.info(f"Container '{container_name}' was already empty")
+
+        return True, deleted_count
+
+    except AzureError as e:
+        error_msg = f"Failed to delete blobs from container '{container_name}': {e}"
+        logger.error(error_msg)
+
+        if raise_on_error:
+            raise AzureError(error_msg) from e
+        return False, deleted_count
+
 
 def upload_cover_art_files(container_name, source_directory):
     """

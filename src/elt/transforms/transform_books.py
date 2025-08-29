@@ -9,15 +9,16 @@ from src.elt.transforms.utils import connect_mongodb
 db, client = connect_mongodb()
 
 # Define the ID field mappings for books collection
-def get_id_mappings(collection_names):
+def get_id_and_name_mappings(collection_names):
     """
-    Fetches custom IDs and MongoDB ObjectIds from specified collections
+    Fetches custom IDs, MongoDB ObjectIds, and names from specified collections
     and returns a dictionary of mappings.
     """
     mappings = {}
     for name in collection_names:
         collection = db[name]
         try:
+            # For all other collections, get the custom ID and the name or ObjectId
             id_field_map = {
                 'genres': 'genre_id',
                 'creators': 'creator_id',
@@ -31,11 +32,31 @@ def get_id_mappings(collection_names):
                 'cover_art': 'cart_id',
                 'languages': 'language_id'
             }
-            id_field = id_field_map.get(name) or name + "_id"
 
-            cursor = collection.find({}, {id_field: 1, '_id': 1})
+            id_field = id_field_map.get(name)
 
-            mappings[name] = {doc[id_field]: doc['_id'] for doc in cursor if id_field in doc}
+            # Special case for collections where we want to store both ObjectId and name
+            if name == 'creators':
+                cursor = collection.find({}, {'_id': 1, 'creator_id': 1, 'creator_firstname': 1, 'creator_lastname': 1})
+                mappings[name] = {doc['creator_id']: {'_id': doc['_id'], 'author_name': f"{doc['creator_firstname']} {doc['creator_lastname']}"} for doc in cursor}
+                logger.info(f"Created mapping for '{name}' collection.")
+                continue
+
+            if name == 'publishers':
+                cursor = collection.find({}, {'_id': 1, 'publisher_id': 1, 'publisher_name': 1})
+                mappings[name] = {doc['publisher_id']: {'_id': doc['_id'], 'publisher_name': doc['publisher_name']} for doc in cursor}
+                logger.info(f"Created mapping for '{name}' collection.")
+                continue
+
+            # For all other collections, get the custom ID and the name or ObjectId
+            if name in ['genres', 'formats', 'languages']:
+                name_field = f"{name.rstrip('s')}_name"
+                cursor = collection.find({}, {id_field: 1, name_field: 1})
+                mappings[name] = {doc[id_field]: doc[name_field] for doc in cursor if id_field in doc}
+            else:
+                cursor = collection.find({}, {id_field: 1, '_id': 1})
+                mappings[name] = {doc[id_field]: doc['_id'] for doc in cursor if id_field in doc}
+
             logger.info(f"Created mapping for '{name}' collection.")
         except (ConnectionFailure, ConfigurationError) as e:
             logger.warning(f"Could not create mapping for '{name}': {e}")
@@ -53,24 +74,24 @@ collections_to_map = [
 ]
 
 # Get the id mappings from the database
-id_mappings = get_id_mappings(collections_to_map)
+id_mappings = get_id_and_name_mappings(collections_to_map)
 
 # Functions to transform data
 
 def parse_multi_value_field(field_string, collection_name):
     """
     Parses a comma-separated string of IDs and converts them into a list of
-    MongoDB ObjectIds using the actual mapping dictionaries from the database.
+    mapped values (ObjectIds or names) using the actual mapping dictionaries.
     """
     if not field_string:
         return []
 
     ids = [item.strip() for item in field_string.split(',')]
-    object_ids = [
-        id_mappings[collection_name].get(old_id)
-        for old_id in ids if old_id in id_mappings[collection_name]
-    ]
-    return object_ids
+    mapped_values = []
+    for old_id in ids:
+        if old_id in id_mappings[collection_name]:
+            mapped_values.append(id_mappings[collection_name].get(old_id))
+    return mapped_values
 
 def parse_awards(awards_string):
     """
@@ -128,7 +149,7 @@ def parse_formats(formats_string):
 
                 # Convert keys and values
                 if key == 'format':
-                    format_doc['format'] = id_mappings['formats'].get(value)
+                    format_doc['format_name'] = id_mappings['formats'].get(value)
                 elif key == 'edition':
                     format_doc['edition'] = value
                 elif key == 'page_count':
@@ -136,9 +157,14 @@ def parse_formats(formats_string):
                 elif key == 'length':
                     format_doc['length'] = value
                 elif key == 'language':
-                    format_doc['language'] = id_mappings['languages'].get(value)
+                    format_doc['language_name'] = id_mappings['languages'].get(value)
                 elif key == 'publisher':
-                    format_doc['publisher'] = id_mappings['publishers'].get(value)
+                    publisher_info = id_mappings['publishers'].get(value)
+                    if publisher_info:
+                        format_doc['publisher'] = {
+                            'publisher_id': publisher_info['_id'],
+                            'publisher_name': publisher_info['publisher_name']
+                        }
                 elif key == 'cover_art':
                     format_doc['cover_art'] = id_mappings['cover_art'].get(value)
                 elif key == 'isbn_13':
@@ -168,7 +194,6 @@ def parse_formats(formats_string):
     return formats_list
 
 # Transform and import books
-
 def transform_and_import_books():
     """
     Main function to fetch raw data from the 'books' collection, transform it,
@@ -185,11 +210,11 @@ def transform_and_import_books():
     transformed_books = []
     for book in books_data:
         try:
-            # New structure without top-level format-specific fields
+            # New structure with both creator IDs and names
             transformed_doc = {
                 "title": book.get("book_title"),
                 "author": parse_multi_value_field(book.get("author"), "creators"),
-                "genre": parse_multi_value_field(book.get("genre"), "genres"),
+                "genre_name": parse_multi_value_field(book.get("genre"), "genres"),
                 "collection": id_mappings["book_collections"].get(book.get("collection")),
                 "collection_index": book.get("collection_index"),
                 "description": book.get("description"),
@@ -201,7 +226,8 @@ def transform_and_import_books():
             }
 
             # Remove keys with None, empty lists, or empty strings
-            cleaned_doc = {k: v for k, v in transformed_doc.items() if v is not None and v != [] and v != ''}
+            cleaned_doc = {k: v for k, v in transformed_doc.items()
+                           if v is not None and v != [] and v != ''}
             transformed_books.append(cleaned_doc)
         except (KeyError, TypeError, ValueError) as e:
             logger.warning(f"Failed to transform book data for book_id {book.get('book_id')}: {e}")

@@ -40,8 +40,8 @@ def main():
     """
     scripts_to_run = [
         "src/elt/load_data.py",
-        "src/elt/transforms/transform_user_reads(alt).py",
-        "src/elt/transforms/transform_books(alt).py",
+        "src/elt/transforms/transform_user_reads.py",
+        "src/elt/transforms/transform_books.py",
         "src/elt/transforms/transform_creators.py",
         "src/elt/transforms/transform_awards.py",
         "src/elt/transforms/transform_covers.py",
