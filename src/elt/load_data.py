@@ -38,7 +38,7 @@ sheets = [
     "books", "creators", "creator_roles", "genres", "book_collections",
     "awards", "award_categories", "award_statuses", "publishers",
     "formats", "tags", "cover_art", "languages", "users", "user_reads",
-    "read_statuses"
+    "read_statuses", "clubs", "club_reads"
 ]
 
 for name in sheets:

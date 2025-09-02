@@ -2,28 +2,34 @@
 import re
 from datetime import datetime
 from loguru import logger
-from src.elt.utils import connect_mongodb, get_id_mappings
-
+from src.elt.utils import connect_mongodb, get_id_mappings, get_name_mappings
 
 # Connect to MongoDB
 db, client = connect_mongodb()
 
-# Define the ID field mappings for user_reads collection
+# Define the ID field mappings
 id_field_map = {
-                'books': 'book',
-                'users': 'user_id',
-                'read_statuses': 'rstatus_id',
+    'books': 'book',
+    'users': 'user_id'
+}
+
+# Define the name field mappings
+name_field_map = {
+    'read_statuses': 'rstatus_id'
+}
+
+field_name_lookup = {
+                'read_statuses': 'rstatus_name'
             }
 
-# Define the collections to get mappings for
-collections_to_map = list(id_field_map.keys())
-
-# Get the id mappings from the database
-id_mappings = get_id_mappings(db, id_field_map, collections_to_map)
+# Get the id and name mappings from the database
+id_mappings = get_id_mappings(db, id_field_map, list(id_field_map.keys()))
+name_mappings = get_name_mappings(db, name_field_map, field_name_lookup, list(name_field_map.keys()))
 
 def parse_rstatus_history(history_string):
     """
-    Parses a string of reading status history into a list of embedded documents.
+    Parses a string of reading status history into a list of embedded documents
+    using the rstatus_name instead of the ObjectId.
     """
     if not history_string:
         return []
@@ -37,7 +43,7 @@ def parse_rstatus_history(history_string):
         if match:
             status_id, date_str = match.groups()
             history_list.append({
-                "rstatus_id": id_mappings['read_statuses'].get(status_id),
+                "rstatus": name_mappings['read_statuses'].get(status_id),
                 "timestamp": datetime.strptime(date_str, '%Y-%m-%d')
             })
     return history_list
@@ -65,7 +71,7 @@ def transform_user_reads():
                 "_id": user_read.get("_id"),
                 "user_id": id_mappings["users"].get(user_read.get("user_id")),
                 "book_id": id_mappings["books"].get(user_read.get("book_id")),
-                "current_rstatus_id": id_mappings["read_statuses"].get(user_read.get("current_rstatus_id")),
+                "current_rstatus": name_mappings["read_statuses"].get(user_read.get("current_rstatus_id")),
                 "rstatus_history": parse_rstatus_history(user_read.get("rstatus_history")),
                 "date_started": datetime.strptime(user_read.get("date_started"), '%Y-%m-%d') if user_read.get("date_started") else None,
                 "date_completed": datetime.strptime(user_read.get("date_completed"), '%Y-%m-%d') if user_read.get("date_completed") else None,
@@ -73,7 +79,10 @@ def transform_user_reads():
                 "notes": user_read.get("notes"),
             }
 
-            transformed_user_reads.append(transformed_doc)
+            # Remove keys with None, empty lists, or empty strings
+            cleaned_doc = {k: v for k, v in transformed_doc.items() if v is not None and v != [] and v != ''}
+            transformed_user_reads.append(cleaned_doc)
+
         except (KeyError, TypeError, ValueError) as e:
             logger.warning(f"Failed to transform user_read data for user_read_id {user_read.get('user_read_id')}: {e}")
             continue

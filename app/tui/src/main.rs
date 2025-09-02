@@ -1,7 +1,8 @@
-use mongodb::{Client, options::ClientOptions, bson::doc};
+use mongodb::{Client, options::ClientOptions, bson::{doc, Document}};
 use dotenv::dotenv;
 use std::env;
 use tokio;
+use futures::stream::TryStreamExt;
 
 #[tokio::main]
 async fn main() -> mongodb::error::Result<()> {
@@ -22,6 +23,18 @@ async fn main() -> mongodb::error::Result<()> {
         .await?;
 
     println!("Connected to MongoDB!");
+
+    // Access the 'book_club' database and 'books' collection
+    let db = client.database("book_club");
+    let collection = db.collection::<Document>("genres");
+
+    // Query all documents
+    let mut cursor = collection.find(None, None).await?;
+
+    println!("Genres in collection:");
+    while let Some(book) = cursor.try_next().await? {
+        println!("{:#?}", book);
+    }
 
     Ok(())
 }

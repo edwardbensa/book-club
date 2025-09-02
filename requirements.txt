@@ -1,0 +1,16 @@
+loguru
+pip
+python-dotenv
+ruff
+tqdm
+typer
+azure.storage.blob
+pymongo
+gspread
+oauth2client
+bson
+pandas
+numpy
+requests
+datetime
+-e .
