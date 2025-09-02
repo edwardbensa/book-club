@@ -37,8 +37,10 @@ logger.info("Dropped all existing collections")
 sheets = [
     "books", "creators", "creator_roles", "genres", "book_collections",
     "awards", "award_categories", "award_statuses", "publishers",
-    "formats", "tags", "cover_art", "languages", "users", "user_reads",
-    "read_statuses", "clubs", "club_reads"
+    "formats", "tags", "cover_art", "languages", "users", "user_reads", "read_statuses",
+    "user_badges", "clubs", "club_members", "club_roles", "club_member_reads",
+    "club_reads", "club_reading_periods", "club_period_books", "club_discussions",
+    "club_events", "club_event_types", "club_event_statuses", "club_badges"
 ]
 
 for name in sheets:
