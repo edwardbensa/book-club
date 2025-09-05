@@ -1,51 +1,47 @@
 # Import modules
 import os
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from dotenv import load_dotenv
+import csv
 from loguru import logger
+from pymongo.errors import ConfigurationError
+from src.config import EXTRACTED_TABLES_DIR
 from src.elt.utils import connect_mongodb
 
-# Load environment variables from .env file
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
-gsheet_cred = os.getenv("GSHEET_CRED")
-
-
-# Google Sheets authorisation
-cred_file = gsheet_cred
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(cred_file, scope) # type: ignore
-client_sheet = gspread.authorize(creds)
-
-# Open spreadsheet
-spreadsheet = client_sheet.open("Book Club DB")
-logger.info("Connected to Google Sheet")
 
 # Connect to MongoDB
 db, client = connect_mongodb()
 
-# Drop all collections to refresh the database
-existing_collections = db.list_collection_names()
+# Drop all existing collections
+for name in db.list_collection_names():
+    db.drop_collection(name)
+    logger.info(f"Dropped collection '{name}'")
 
-for collection_name in existing_collections:
-    db.drop_collection(collection_name)
-    print(f"Dropped collection '{collection_name}'")
 
-logger.info("Dropped all existing collections")
+def load_csv_to_mongo():
+    """
+    Loads all CSV files in the specified directory into MongoDB.
+    Each file is loaded into a collection named after the file (without .csv).
+    """
+    for filename in os.listdir(EXTRACTED_TABLES_DIR):
+        if not filename.endswith(".csv"):
+            continue
 
-# Import sheets
-sheets = [
-    "books", "creators", "creator_roles", "genres", "book_collections",
-    "awards", "award_categories", "award_statuses", "publishers",
-    "formats", "tags", "cover_art", "languages", "users", "user_reads", "read_statuses",
-    "user_badges", "clubs", "club_members", "club_roles", "club_member_reads",
-    "club_reads", "club_reading_periods", "club_period_books", "club_discussions",
-    "club_events", "club_event_types", "club_event_statuses", "club_badges"
-]
+        collection_name = os.path.splitext(filename)[0]
+        file_path = os.path.join(EXTRACTED_TABLES_DIR, filename)
 
-for name in sheets:
-    sheet = spreadsheet.worksheet(name)
-    data = sheet.get_all_records()
-    db[name].insert_many(data)
-    print(f"Imported {len(data)} records into '{name}' collection.")
-logger.info("Created collections in database")
+        try:
+            with open(file_path, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                records = [row for row in reader if any(row.values())]  # Skip empty rows
+
+            if records:
+                db[collection_name].insert_many(records)
+                logger.info(f"Inserted {len(records)} records into '{collection_name}'")
+            else:
+                logger.warning(f"No records found in '{filename}'")
+
+        except ConfigurationError as e:
+            logger.error(f"Failed to load '{filename}': {e}")
+
+if __name__ == "__main__":
+    load_csv_to_mongo()
+    logger.info("Loaded all extracted CSVs into MongoDB")

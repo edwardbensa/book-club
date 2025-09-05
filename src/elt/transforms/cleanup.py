@@ -33,6 +33,9 @@ collections_to_modify = {
     "languages": "language_id",
     "creator_roles": "cr_id",
     "read_statuses": "rstatus_id",
+    "club_event_types": "event_type_id",
+    "club_event_statuses": "event_status_id",
+    "club_member_roles": "role_id",
 }
 
 for collection_name, id_field in collections_to_modify.items():

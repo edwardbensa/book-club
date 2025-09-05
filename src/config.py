@@ -16,6 +16,7 @@ INTERIM_DATA_DIR = DATA_DIR / "interim"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 EXTERNAL_DATA_DIR = DATA_DIR / "external"
 COVER_ART_DIR = EXTERNAL_DATA_DIR / "cover_art"
+EXTRACTED_TABLES_DIR = RAW_DATA_DIR / "extracted_tables"
 
 MODELS_DIR = PROJ_ROOT / "models"
 

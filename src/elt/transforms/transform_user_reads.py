@@ -1,8 +1,7 @@
 # Import modules
 import re
-from datetime import datetime
-from loguru import logger
-from src.elt.utils import connect_mongodb, get_id_mappings, get_name_mappings
+from src.elt.utils import (connect_mongodb, get_id_mappings, get_name_mappings,
+                           to_datetime, transform_collection, make_subdocuments)
 
 # Connect to MongoDB
 db, client = connect_mongodb()
@@ -24,78 +23,39 @@ field_name_lookup = {
 
 # Get the id and name mappings from the database
 id_mappings = get_id_mappings(db, id_field_map, list(id_field_map.keys()))
-name_mappings = get_name_mappings(db, name_field_map, field_name_lookup, list(name_field_map.keys()))
+name_mappings= get_name_mappings(db, name_field_map, field_name_lookup, list(name_field_map.keys()))
 
-def parse_rstatus_history(history_string):
-    """
-    Parses a string of reading status history into a list of embedded documents
-    using the rstatus_name instead of the ObjectId.
-    """
-    if not history_string:
-        return []
 
-    history_list = []
-    # Split the string by comma to get individual entries
-    entries = history_string.split(';')
-    for entry in entries:
-        # Use regex to find the status ID and date
-        match = re.match(r'(.+):\s*(\d{4}-\d{2}-\d{2})', entry.strip())
-        if match:
-            status_id, date_str = match.groups()
-            history_list.append({
-                "rstatus": name_mappings['read_statuses'].get(status_id),
-                "timestamp": datetime.strptime(date_str, '%Y-%m-%d')
-            })
-    return history_list
+subdoc_registry = {
+    'rstatus_history': {
+        'pattern': re.compile(r'(.+):\s*(\d{4}-\d{2}-\d{2})'),
+        'transform': lambda match: {
+            "rstatus": name_mappings['read_statuses'].get(match.group(1)),
+            "timestamp": to_datetime(match.group(2))
+        }
+    },
+}
+
+
+def transform_func(doc):
+    """
+    Transforms a user_read document to the desired structure.
+    """
+    transformed_doc = {
+        "_id": doc.get("_id"),
+        "user_id": id_mappings["users"].get(doc.get("user_id")),
+        "book_id": id_mappings["books"].get(doc.get("book_id")),
+        "current_rstatus": name_mappings["read_statuses"].get(doc.get("current_rstatus_id")),
+        "rstatus_history": make_subdocuments(doc.get("rstatus_history"), 'rstatus_history',
+                                             subdoc_registry, separator=','),
+        "date_started": to_datetime(doc.get("date_started")),
+        "date_completed": to_datetime(doc.get("date_completed")),
+        "book_rating": None if doc.get("book_rating") == "" else int(doc.get("book_rating")),
+        "notes": doc.get("notes"),
+    }
+    return transformed_doc
 
 
 # Transform 'user_reads' collection
-def transform_user_reads():
-    """
-    Main function to fetch raw data from the 'user_reads' collection, transform it,
-    and insert it into a temporary collection before replacing the original.
-    """
-    try:
-        raw_user_reads_collection = db["user_reads"]
-        user_reads_data = list(raw_user_reads_collection.find({}))
-        logger.info(f"Fetched {len(user_reads_data)} records from 'user_reads' collection.")
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error(f"Failed to fetch data from 'user_reads' collection: {e}")
-        return
-
-    transformed_user_reads = []
-    for user_read in user_reads_data:
-        try:
-            # Create a new document with the desired structure
-            transformed_doc = {
-                "_id": user_read.get("_id"),
-                "user_id": id_mappings["users"].get(user_read.get("user_id")),
-                "book_id": id_mappings["books"].get(user_read.get("book_id")),
-                "current_rstatus": name_mappings["read_statuses"].get(user_read.get("current_rstatus_id")),
-                "rstatus_history": parse_rstatus_history(user_read.get("rstatus_history")),
-                "date_started": datetime.strptime(user_read.get("date_started"), '%Y-%m-%d') if user_read.get("date_started") else None,
-                "date_completed": datetime.strptime(user_read.get("date_completed"), '%Y-%m-%d') if user_read.get("date_completed") else None,
-                "book_rating": None if user_read.get("book_rating") == "" else user_read.get("book_rating"),
-                "notes": user_read.get("notes"),
-            }
-
-            # Remove keys with None, empty lists, or empty strings
-            cleaned_doc = {k: v for k, v in transformed_doc.items() if v is not None and v != [] and v != ''}
-            transformed_user_reads.append(cleaned_doc)
-
-        except (KeyError, TypeError, ValueError) as e:
-            logger.warning(f"Failed to transform user_read data for user_read_id {user_read.get('user_read_id')}: {e}")
-            continue
-
-    if transformed_user_reads:
-        # Drop the existing 'user_reads' collection and insert transformed collection
-        db.drop_collection("user_reads")
-        logger.info("Dropped existing 'user_reads' collection.")
-
-        db["user_reads"].insert_many(transformed_user_reads)
-        logger.info(f"Successfully imported {len(transformed_user_reads)} transformed user_reads into the 'user_reads' collection.")
-    else:
-        logger.warning("No user_reads were transformed or imported.")
-
 if __name__ == "__main__":
-    transform_user_reads()
+    transform_collection(db, "user_reads", transform_func)
