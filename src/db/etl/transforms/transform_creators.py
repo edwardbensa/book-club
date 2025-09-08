@@ -1,65 +1,39 @@
 # Import modules
-from loguru import logger
-from src.db.utils.connectors import connect_mongodb
-from src.db.utils.doc_transformers import get_id_mappings
+from src.db.utils.parsers import make_array
+from src.db.utils.transforms import transform_collection
+from src.db.utils.lookups import load_lookup_data, resolve_lookup
 
+# Define lookup registry
+lookup_registry = {
+    "creator_roles": {"field": "cr_id", "get": "cr_name"}
+}
 
-# Connect to MongoDB
-db, client = connect_mongodb()
+# Load lookup data
+lookup_data = load_lookup_data(lookup_registry)
 
-# Define the ID field mappings for creators collection
-id_field_map = {
-                'creator_roles': 'cr_id',
-            }
+# Subdoc registry for array fields
+array_registry = {
+    "creator_roles": {
+        "pattern": None,
+        "transform": lambda val: resolve_lookup("creator_roles", val, lookup_data)
+    }
+}
 
-# Define the collections to get mappings for
-collections_to_map = list(id_field_map.keys())
-
-# Get the id mappings from the database
-id_mappings = get_id_mappings(db, id_field_map, collections_to_map)
-
-
-# Transform 'creators' collection
-def transform_creators():
+# Transform function
+def transform_creators_func(doc):
     """
-    Main function to fetch raw data from the 'creators' collection, transform it,
-    and insert it into a temporary collection before replacing the original.
+    Transforms a creators document to the desired structure.
     """
-    try:
-        raw_creators_collection = db["creators"]
-        creators_data = list(raw_creators_collection.find({}))
-        logger.info(f"Fetched {len(creators_data)} records from 'creators' collection.")
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error(f"Failed to fetch data from 'creators' collection: {e}")
-        return
+    return {
+        "_id": doc.get("_id"),
+        "creator_id": doc.get("creator_id"),
+        "creator_firstname": doc.get("creator_firstname"),
+        "creator_lastname": doc.get("creator_lastname"),
+        "creator_bio": doc.get("creator_bio"),
+        "creator_website": doc.get("creator_website"),
+        "creator_roles": make_array(doc.get("creator_roles"), "creator_roles", array_registry, ",")
+    }
 
-    transformed_creators = []
-    for creator in creators_data:
-        try:
-            # Create a new document with the desired structure
-            transformed_doc = {
-                "_id": creator.get("_id"),
-                "creator_firstname": creator.get("creator_firstname"),
-                "creator_lastname": creator.get("creator_lastname"),
-                "creator_bio": creator.get("creator_bio"),
-                "creator_website": creator.get("creator_website"),
-                "creator_roles": id_mappings["creator_roles"].get(creator.get("creator_roles")),
-            }
-
-            transformed_creators.append(transformed_doc)
-        except (KeyError, TypeError, ValueError) as e:
-            logger.warning(f"Failed to transform data for creator_id {creator.get('creator_id')}: {e}")
-            continue
-
-    if transformed_creators:
-        # Drop the existing 'creators' collection and insert transformed collection
-        db.drop_collection("creators")
-        logger.info("Dropped existing 'creators' collection.")
-
-        db["creators"].insert_many(transformed_creators)
-        logger.info(f"Successfully imported {len(transformed_creators)} transformed creators into the 'creators' collection.")
-    else:
-        logger.warning("No creators were transformed or imported.")
-
+# Run transformation
 if __name__ == "__main__":
-    transform_creators()
+    transform_collection("creators", transform_creators_func)

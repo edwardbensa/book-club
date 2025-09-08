@@ -1,14 +1,14 @@
 # Import necessary modules
 import os
-from urllib.parse import urlparse
+import json
 import shutil
+from urllib.parse import urlparse
 from typing import Tuple
 import requests
 from loguru import logger
-from bson.objectid import ObjectId
 from azure.core.exceptions import AzureError, ResourceNotFoundError
-from src.db.utils.connectors import connect_mongodb, connect_azure_blob
-from src.config import COVER_ART_DIR
+from src.db.utils.connectors import connect_azure_blob
+from src.config import COVER_ART_DIR, RAW_COLLECTIONS_DIR, TRANSFORMED_COLLECTIONS_DIR
 
 # Function to delete existing cover art in the local directory
 def delete_existing_images():
@@ -34,90 +34,54 @@ def delete_existing_images():
         # If deletion fails, stop the process to prevent errors later
         exit()
 
-# --- 1. SET UP CONNECTIONS AND CLIENTS ---
-
-# Connect to MongoDB
-db, client = connect_mongodb()
 
 # Connect to Azure Blob Storage
 blob_service_client = connect_azure_blob()
-
-# Define the container name where you upload and retrieve images
 CONTAINER_NAME = 'cover-art'
 
-# Download, upload, and update image URLs in Azure Blob Storage
 
+# Download, upload, and update image URLs in Azure Blob Storage
 def download_images():
     """
-    Fetches image URLs from the 'cover_art' collection, downloads the images,
-    and saves them to a local directory.
+    Loads cover_art.json from disk, downloads each image from its cart_url,
+    and saves it to COVER_ART_DIR using the _id as filename.
     """
-    cover_art_collection = db["cover_art"]
+    input_path = os.path.join(RAW_COLLECTIONS_DIR, "cover_art.json")
     try:
-        cover_art_data = list(cover_art_collection.find({}, {"cart_url": 1}))
-        logger.info(f"Found {len(cover_art_data)} URLs to download.")
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error(f"Failed to fetch data from 'cover_art' collection: {e}")
+        with open(input_path, encoding="utf-8") as f:
+            cover_art_data = json.load(f)
+        logger.info(f"Found {len(cover_art_data)} cover art entries to process.")
+    except Exception as e:
+        logger.error(f"Failed to load cover_art.json: {e}")
         return
 
     for doc in cover_art_data:
         image_url = doc.get("cart_url")
         if not image_url:
-            logger.warning(f"Document with _id {doc.get('_id')} has no 'cart_url'. Skipping.")
+            logger.warning(f"Entry with _id {doc.get('_id')} has no 'cart_url'. Skipping.")
             continue
 
         try:
-            # Use the cart_id as the filename and infer the file extension
             parsed_url = urlparse(image_url)
-            extension = os.path.splitext(parsed_url.path)[1]
-            # If no extension found, default to .jpg
-            if not extension:
-                extension = ".jpg"
-
-            filename = f"{str(doc.get('_id'))}{extension}"
+            extension = os.path.splitext(parsed_url.path)[1] or ".jpg"
+            filename = f"{doc['_id']}{extension}"
             file_path = os.path.join(COVER_ART_DIR, filename)
 
             logger.info(f"Downloading {image_url}...")
             response = requests.get(image_url, stream=True, timeout=10)
-            response.raise_for_status()  # Raise exception for bad status codes
+            response.raise_for_status()
 
-            # Save the image content to the local file
             with open(file_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            logger.success(f"Successfully saved {filename}")
+            logger.success(f"Saved image as {filename}")
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to download image from {image_url}: {e}")
+            logger.error(f"Download failed for {image_url}: {e}")
         except IOError as e:
-            logger.error(f"Failed to save file {file_path}: {e}")
+            logger.error(f"Failed to save image {file_path}: {e}")
 
-def delete_container_contents1(container_name):
-    """
-    Deletes all blobs from the specified Azure Blob Storage container.
-    """
-    try:
-        container_client = blob_service_client.get_container_client(container_name)
-        blobs_to_delete = container_client.list_blobs()
-
-        logger.info(f"Checking for existing blobs in container '{container_name}'...")
-
-        # Count existing blobs to decide whether to proceed
-        blob_count = sum(1 for _ in blobs_to_delete)
-        if blob_count > 0:
-            logger.info(f"Found {blob_count} blobs. Deleting them now...")
-            for blob in blobs_to_delete:
-                container_client.delete_blob(blob.name)
-                logger.debug(f"Deleted blob: {blob.name}")
-            logger.success(f"Successfully deleted all blobs from container '{container_name}'.")
-        else:
-            logger.info(f"Container '{container_name}' is already empty. No deletion needed.")
-
-    except AzureError as e:
-        logger.error(f"Failed to delete blobs from container '{container_name}': {e}")
-        # The script should not proceed if this critical step fails
-        exit()
 
 def delete_container_contents(container_name: str,raise_on_error: bool = True) -> Tuple[bool, int]:
     """
@@ -221,47 +185,45 @@ def upload_cover_art_files(container_name, source_directory):
         # The script should not proceed if this critical step fails
         exit()
 
+
 def update_image_urls():
     """
-    Connects to Azure Blob Storage, retrieves the URLs of uploaded images,
-    and updates the corresponding documents in the MongoDB 'cover_art' collection.
+    Updates cart_url fields in cover_art.json to point to Azure-hosted URLs.
     """
+    input_path = os.path.join(RAW_COLLECTIONS_DIR, "cover_art.json")
+    output_path = os.path.join(TRANSFORMED_COLLECTIONS_DIR, "cover_art.json")
+
     try:
-        container_client = blob_service_client.get_container_client(CONTAINER_NAME)
-        # List all blobs (files) in the container
-        blobs = container_client.list_blobs()
-        logger.info("Listing blobs in Azure container to update MongoDB URLs...")
-    except (AzureError, OSError) as e:
-        logger.error(f"Failed to get container client or list blobs: {e}")
+        with open(input_path, encoding="utf-8") as f:
+            cover_art_data = json.load(f)
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Failed to load cover_art.json: {e}")
         return
 
+    container_client = blob_service_client.get_container_client(CONTAINER_NAME)
+    blobs = container_client.list_blobs()
+    blob_map = {os.path.splitext(blob.name)[0]: blob.name for blob in blobs}
+
     updated_count = 0
-    for blob in blobs:
-        object_id_str = os.path.splitext(blob.name)[0]
+    for doc in cover_art_data:
+        object_id_str = str(doc["_id"])
+        blob_name = blob_map.get(object_id_str)
 
-        try:
-            # Construct the new public URL for the image
-            new_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob.name}"
+        if blob_name:
+            new_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{CONTAINER_NAME}/{blob_name}"
+            doc["cart_url"] = new_url
+            updated_count += 1
+            logger.debug(f"Updated cart_url for _id {object_id_str}")
+        else:
+            logger.warning(f"No blob found for _id {object_id_str}")
 
-            # Find the document in MongoDB by its ObjectId and update the 'cart_url' field
-            result = db["cover_art"].update_one(
-                {"_id": ObjectId(object_id_str)},
-                {"$set": {"cart_url": new_url}}
-            )
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(cover_art_data, f, ensure_ascii=False, indent=2)
+        logger.success(f"Updated {updated_count} cart_url entries in cover_art.json")
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Failed to write updated cover_art.json: {e}")
 
-            if result.matched_count > 0:
-                logger.success(f"Updated document with _id {object_id_str}. New URL: {new_url}")
-                updated_count += 1
-            else:
-                logger.warning(f"No document found for _id: {object_id_str}. This may indicate a mismatch between files and database entries.")
-
-        except (AzureError, OSError, ValueError, TypeError) as e:
-            logger.error(f"Failed to update URL for blob {blob.name}: {e}")
-            continue
-
-    logger.success(f"Finished updating MongoDB. {updated_count} documents were modified.")
-
-# --- 3. MAIN EXECUTION BLOCK ---
 
 if __name__ == "__main__":
     delete_existing_images()
@@ -270,5 +232,4 @@ if __name__ == "__main__":
     upload_cover_art_files(CONTAINER_NAME, COVER_ART_DIR)
     update_image_urls()
 
-    client.close()
-    logger.info("MongoDB connection closed.")
+    logger.info("Transformed cover art collection created.")

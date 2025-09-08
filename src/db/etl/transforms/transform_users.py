@@ -1,40 +1,28 @@
 # Import modules
 import re
-from src.db.utils.parsers import to_datetime, to_int
-from src.db.utils.doc_transformers import transform_collection, make_subdocuments, resolve_lookup
+from src.db.utils.transforms import transform_collection
+from src.db.utils.parsers import to_int, make_subdocuments
+from src.db.utils.lookups import resolve_lookup, load_lookup_data
 from src.db.utils.security import encrypt_pii, hash_password, latest_key_version
 
 
 # Define field lookups
 lookup_registry = {
-    'books': {
-        'string_field': 'book_id',
-        'get': '_id'
-    },
-    'genres': {
-        'string_field': 'genre_name',
-        'get': ['_id', 'genre_name']
-    },
-    'users': {
-        'string_field': 'user_id',
-        'get': '_id'
-    },
-    'user_badges': {
-        'string_field': 'badge_name',
-        'get': ['_id', 'badge_name']
-    },
-    'read_statuses': {
-        'string_field': 'rstatus_id',
-        'get': 'rstatus_name'
-    }
+    'books': {'field': 'book_id', 'get': '_id'},
+    'genres': {'field': 'genre_name', 'get': ['_id', 'genre_name']},
+    'users': {'field': 'user_id', 'get': '_id'},
+    'user_badges': {'field': 'badge_name', 'get': ['_id', 'badge_name']},
+    'read_statuses': {'field': 'rstatus_id', 'get': 'rstatus_name'}
 }
+
+lookup_data = load_lookup_data(lookup_registry)
 
 subdoc_registry = {
     'rstatus_history': {
         'pattern': re.compile(r'(.+):\s*(\d{4}-\d{2}-\d{2})'),
         'transform': lambda match: {
-            "rstatus": resolve_lookup('read_statuses', match.group(1), lookup_registry),
-            "timestamp": to_datetime(match.group(2))
+            "rstatus": resolve_lookup('read_statuses', match.group(1), lookup_data),
+            "timestamp": match.group(2)
         }
     },
     'user_readinggoal': {
@@ -47,13 +35,13 @@ subdoc_registry = {
     'user_badges': {
         'pattern': re.compile(r'badge:\s*(.+?),\s*timestamp:\s*(\d{4}-\d{2}-\d{2})'),
         'transform': lambda match: {
-            **resolve_lookup('user_badges', match.group(1), lookup_registry), # type: ignore
-            "timestamp": to_datetime(match.group(2))
+            **resolve_lookup('user_badges', match.group(1), lookup_data), # type: ignore
+            "timestamp": match.group(2)
         }
     },
     'user_genres': {
         'pattern': None,
-        'transform': lambda genre_name: resolve_lookup('genres', genre_name, lookup_registry)
+        'transform': lambda genre_name: resolve_lookup('genres', genre_name, lookup_data)
     }
 }
 
@@ -64,14 +52,14 @@ def transform_user_reads_func(doc):
     """
     transformed_doc = {
         "_id": doc.get("_id"),
-        "user_id": resolve_lookup('users', doc.get("user_id"), lookup_registry),
-        "book_id": resolve_lookup('books', doc.get("book_id"), lookup_registry),
+        "user_id": resolve_lookup('users', doc.get("user_id"), lookup_data),
+        "book_id": resolve_lookup('books', doc.get("book_id"), lookup_data),
         "current_rstatus": resolve_lookup('read_statuses', doc.get("current_rstatus_id"),
-                                          lookup_registry),
+                                          lookup_data),
         "rstatus_history": make_subdocuments(doc.get("rstatus_history"), 'rstatus_history',
                                              subdoc_registry, separator=','),
-        "date_started": to_datetime(doc.get("date_started")),
-        "date_completed": to_datetime(doc.get("date_completed")),
+        "date_started": doc.get("date_started"),
+        "date_completed": doc.get("date_completed"),
         "book_rating": None if doc.get("book_rating") == "" else int(doc.get("book_rating")),
         "notes": doc.get("notes"),
     }
@@ -104,7 +92,7 @@ def transform_users_func(doc):
                                              subdoc_registry, separator='|'),
         "user_genres": make_subdocuments(doc.get("user_genres"), 'user_genres',
                                              subdoc_registry, separator=','),
-        "date_joined": to_datetime(doc.get("date_joined")),
+        "date_joined": doc.get("date_joined"),
         "key_version": key_version
     }
     return transformed_doc

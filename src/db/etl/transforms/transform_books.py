@@ -1,8 +1,9 @@
 # Import modules
 import re
-from src.db.utils.parsers import to_int, make_array_field, make_subdocuments
-from src.db.utils.lookups import (build_lookup_map, resolve_lookup, resolve_creator,
-                                  transform_collection, resolve_awards, resolve_format_entry)
+from src.db.utils.transforms import transform_collection
+from src.db.utils.parsers import to_int, to_array, make_subdocuments
+from src.db.utils.lookups import (load_lookup_data, resolve_lookup, resolve_creator,
+                                  resolve_awards, resolve_format_entry)
 
 
 # Load and map all lookup collections
@@ -16,10 +17,7 @@ lookup_registry = {
     'publishers': {'field': 'publisher_name', 'get': ['_id', 'publisher_name']},
 }
 
-lookup_data = {
-    collection: build_lookup_map(collection, config['field'], config['get'])
-    for collection, config in lookup_registry.items()
-}
+lookup_data = load_lookup_data(lookup_registry)
 
 
 # Subdoc registry
@@ -44,12 +42,15 @@ subdoc_registry = {
 
 # Transform function
 def transform_books_func(doc):
+    """
+    Transforms a books document to the desired structure.
+    """
     return {
         "_id": doc.get("_id"),
         "book_id": doc.get("book_id"),
         "book_title": doc.get("book_title"),
         "author": make_subdocuments(doc.get("author"), "authors", subdoc_registry, separator=','),
-        "genre": make_array_field(doc.get("genre")),
+        "genre": to_array(doc.get("genre")),
         "collection": resolve_lookup('book_collections', doc.get("collection"), lookup_data),
         "collection_index": to_int(doc.get("collection_index")),
         "description": doc.get("description"),
@@ -57,7 +58,7 @@ def transform_books_func(doc):
         "contributors": make_subdocuments(doc.get("contributors"), "contributors", subdoc_registry, separator=','),
         "format": make_subdocuments(doc.get("format"), "format", subdoc_registry, separator='|'),
         "awards": make_subdocuments(doc.get("awards"), "awards", subdoc_registry, separator='|'),
-        "tags": make_array_field(doc.get("tags")),
+        "tags": to_array(doc.get("tags")),
     }
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@
 import subprocess
 import sys
 from loguru import logger
+from src.db.utils.misc import empty_directory
+from src.config import TRANSFORMED_COLLECTIONS_DIR
 
 def run_script(script_path):
     """
@@ -39,15 +41,15 @@ def main():
     Main function to run the ELT pipeline in sequence.
     """
     scripts_to_run = [
-        "src/db/elt/extract_data.py",
-        "src/db/elt/load_data.py",
-        "src/db/elt/transforms/transform_clubs.py",
-        "src/db/elt/transforms/transform_users.py",
-        "src/db/elt/transforms/transform_books.py",
-        "src/db/elt/transforms/transform_creators.py",
-        "src/db/elt/transforms/transform_awards.py",
-        "src/db/elt/transforms/transform_covers.py",
-        "src/db/elt/transforms/cleanup.py"
+        #"src/db/etl/extract_data.py",
+        "src/db/etl/transforms/transform_clubs.py",
+        "src/db/etl/transforms/transform_users.py",
+        "src/db/etl/transforms/transform_books.py",
+        "src/db/etl/transforms/transform_creators.py",
+        "src/db/etl/transforms/transform_awards.py",
+        "src/db/etl/transforms/transform_covers.py",
+        "src/db/etl/transforms/cleanup.py",
+        "src/db/etl/load_data.py"
     ]
 
     for script in scripts_to_run:
@@ -58,4 +60,5 @@ def main():
     logger.success("ELT pipeline completed successfully!")
 
 if __name__ == "__main__":
+    empty_directory(TRANSFORMED_COLLECTIONS_DIR)
     main()

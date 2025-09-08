@@ -15,13 +15,18 @@ def clean_document(doc):
 def to_datetime(date_string):
     """
     Converts a date string to a datetime object.
-    Supports both 'YYYY-MM-DD' and 'YYYY-MM-DD HH:MM' formats.
     Returns None if the input is None, empty, or invalid.
     """
-    if not date_string:
+    if not date_string or not isinstance(date_string, str):
         return None
 
-    formats = ['%Y-%m-%d %H:%M', '%Y-%m-%d']
+    formats = [
+        '%Y-%m-%d %H:%M:%S.%f',
+        '%Y-%m-%d %H:%M:%S',
+        '%Y-%m-%d %H:%M',
+        '%Y-%m-%d'
+    ]
+
     for fmt in formats:
         try:
             return datetime.strptime(date_string.strip(), fmt)
@@ -45,7 +50,7 @@ def to_int(value):
         return None
 
 
-def make_array_field(field_string):
+def to_array(field_string):
     """
     Converts a comma-separated string into a list of trimmed strings.
     """
@@ -83,3 +88,21 @@ def make_subdocuments(string: str, field_key: str, registry, separator = ';'):
         return transformed_list
     else:
         return [transform(entry) for entry in entries]
+
+
+def make_array(string: str, field_key: str, registry, separator=';'):
+    """
+    Parses a separator-separated string into a list of transformed values
+    using the transform function defined in the registry.
+    """
+    if not string:
+        return []
+
+    config = registry.get(field_key)
+    if not config or not callable(config.get('transform')):
+        logger.error(f"Invalid array config for field '{field_key}'")
+        return []
+
+    transform = config['transform']
+    entries = [entry.strip() for entry in string.split(separator) if entry.strip()]
+    return [transform(entry) for entry in entries]
