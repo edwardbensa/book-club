@@ -7,7 +7,7 @@ import requests
 from loguru import logger
 from bson.objectid import ObjectId
 from azure.core.exceptions import AzureError, ResourceNotFoundError
-from src.elt.utils import connect_mongodb, connect_azure_blob
+from src.db.utils.connectors import connect_mongodb, connect_azure_blob
 from src.config import COVER_ART_DIR
 
 # Function to delete existing cover art in the local directory

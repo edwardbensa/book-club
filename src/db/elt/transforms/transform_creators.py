@@ -1,6 +1,7 @@
 # Import modules
 from loguru import logger
-from src.elt.utils import connect_mongodb, get_id_mappings
+from src.db.utils.connectors import connect_mongodb
+from src.db.utils.doc_transformers import get_id_mappings
 
 
 # Connect to MongoDB

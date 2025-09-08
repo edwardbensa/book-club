@@ -23,7 +23,7 @@ MODELS_DIR = PROJ_ROOT / "models"
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 
-SECRETS_DIR = PROJ_ROOT / "src" / "secrets"
+SECRETS_DIR = PROJ_ROOT / "src" / "db" / "secrets"
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135

@@ -3,7 +3,8 @@ import re
 from datetime import datetime
 from pymongo.errors import ConnectionFailure, ConfigurationError
 from loguru import logger
-from src.elt.utils import connect_mongodb
+from src.db.utils.connectors import connect_mongodb
+from src.db.utils.doc_transformers import refresh_collection
 
 # Connect to MongoDB
 db, client = connect_mongodb()
@@ -28,9 +29,8 @@ def get_id_and_name_mappings(collection_names):
                 'award_statuses': 'astatus_id',
                 'book_collections': 'bcollection_id',
                 'formats': 'format_id',
-                'publishers': 'publisher_id',
+                'publishers': 'publisher_name',
                 'cover_art': 'cart_id',
-                'languages': 'language_id'
             }
 
             id_field = id_field_map.get(name)
@@ -70,7 +70,7 @@ def get_id_and_name_mappings(collection_names):
 collections_to_map = [
     "genres", "creators", "tags", "awards", "award_categories",
     "award_statuses", "book_collections", "formats", "publishers",
-    "cover_art", "languages"
+    "cover_art"
 ]
 
 # Get the id mappings from the database
@@ -141,7 +141,7 @@ def parse_formats(formats_string):
     for raw_format in raw_formats:
         format_doc = {}
         # Split by comma to get key:value pairs
-        parts = [p.strip() for p in raw_format.split(',')]
+        parts = [p.strip() for p in raw_format.split(';')]
 
         for part in parts:
             if ':' in part:
@@ -157,7 +157,7 @@ def parse_formats(formats_string):
                 elif key == 'length':
                     format_doc['length'] = value
                 elif key == 'language':
-                    format_doc['language_name'] = id_mappings['languages'].get(value)
+                    format_doc['language_name'] = value
                 elif key == 'publisher':
                     publisher_info = id_mappings['publishers'].get(value)
                     if publisher_info:
@@ -215,7 +215,7 @@ def transform_and_import_books():
                 "title": book.get("book_title"),
                 "author": parse_multi_value_field(book.get("author"), "creators"),
                 "genre_name": parse_multi_value_field(book.get("genre"), "genres"),
-                "collection": id_mappings["book_collections"].get(book.get("collection")),
+                "collection": book.get(book.get("collection")),
                 "collection_index": book.get("collection_index"),
                 "description": book.get("description"),
                 "first_publication_date": datetime.strptime(book.get("first_publication_date"), '%Y-%m-%d') if book.get("first_publication_date") else None,
@@ -244,4 +244,5 @@ def transform_and_import_books():
         logger.warning("No books were transformed or imported.")
 
 if __name__ == "__main__":
+    refresh_collection('books')
     transform_and_import_books()

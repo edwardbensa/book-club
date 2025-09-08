@@ -4,7 +4,7 @@ import csv
 from loguru import logger
 from pymongo.errors import ConfigurationError
 from src.config import EXTRACTED_TABLES_DIR
-from src.elt.utils import connect_mongodb
+from src.db.utils.connectors import connect_mongodb
 
 
 # Connect to MongoDB

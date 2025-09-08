@@ -4,23 +4,12 @@ import csv
 import time
 import shutil
 import gspread
-from dotenv import load_dotenv
-from oauth2client.service_account import ServiceAccountCredentials
 from loguru import logger
+from src.db.utils.connectors import connect_googlesheet
 from src.config import EXTRACTED_TABLES_DIR
 
-# Load environment variables
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
-gsheet_cred = os.getenv("GSHEET_CRED")
-
-# Google Sheets authorization
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(gsheet_cred, scope)  # type: ignore
-client_sheet = gspread.authorize(creds)
-
-# Open spreadsheet
-spreadsheet = client_sheet.open("Book Club DB")
-logger.info("Connected to Google Sheet")
+# Connect to Book CLub DB spreadsheet
+spreadsheet = connect_googlesheet()
 
 
 # Function to delete existing tables in the local directory
@@ -54,7 +43,7 @@ def extract_sheets(sheet_names):
     """
     for name in sheet_names:
         try:
-            sheet = spreadsheet.worksheet(name)
+            sheet = spreadsheet.worksheet(name) # type: ignore
             records = sheet.get_all_records()
 
             # Save to CSV

@@ -2,16 +2,17 @@
 import re
 from datetime import datetime
 from loguru import logger
-from src.elt.utils import (connect_mongodb, make_array_field,
-                           transform_collection, get_id_mappings,
-                           to_datetime, make_subdocuments, to_int)
+from src.db.utils.connectors import connect_mongodb
+from src.db.utils.parsers import to_datetime, to_int
+from src.db.utils.doc_transformers import (make_array_field, transform_collection,
+                             get_id_mappings, make_subdocuments)
 
 # Connect to MongoDB
 db, client = connect_mongodb()
 
 # Define ID field mappings
 id_field_map = {
-    'books': 'book',
+    'books': 'book_id',
     'users': 'user_id',
     'clubs': 'club_id',
     'club_reading_periods': 'period_id',
@@ -19,7 +20,7 @@ id_field_map = {
 }
 
 # Get mappings from database
-id_mappings = get_id_mappings(db, id_field_map, list(id_field_map.keys()))
+id_mappings = get_id_mappings(id_field_map, list(id_field_map.keys()))
 
 subdoc_registry = {
     'votes': {
@@ -60,7 +61,7 @@ def transform_club_members_func(doc):
         "club_id": id_mappings["clubs"].get(doc.get("club_id")),
         "user_id": id_mappings["users"].get(doc.get("user_id")),
         "role": doc.get("role"),
-        "join_date": to_datetime(doc.get("join_date")),
+        "date_joined": to_datetime(doc.get("date_joined")),
         "is_active": doc.get("is_active"),
         "created_at": datetime.now()
     }
@@ -78,6 +79,23 @@ def transform_club_member_roles_func(doc):
         "role_name": doc.get("role_name"),
         "role_permissions": make_array_field(doc.get("role_permissions", "")),
         "role_description": doc.get("role_description"),
+        "created_at": datetime.now()
+    }
+    return transformed_doc
+
+
+# Transform 'club_member_reads' collection
+def transform_club_member_reads_func(doc):
+    """
+    Transforms a club_member_reads document to the desired structure.
+    """
+    transformed_doc = {
+        "_id": doc.get("_id"),
+        "club_id": id_mappings["clubs"].get(doc.get("club_id")),
+        "user_id": id_mappings["users"].get(doc.get("user_id")),
+        "book_id": id_mappings["books"].get(doc.get("book_id")),
+        "period_id": id_mappings["club_reading_periods"].get(doc.get("period_id")),
+        "read_date": to_datetime(doc.get("read_date")),
         "created_at": datetime.now()
     }
     return transformed_doc
@@ -205,12 +223,13 @@ def transform_clubs_func(doc):
 
 # Run all transformations
 if __name__ == "__main__":
-    transform_collection(db, "club_members", transform_club_members_func)
-    transform_collection(db, "club_member_roles", transform_club_member_roles_func)
-    transform_collection(db, "club_reads", transform_club_reads_func)
-    transform_collection(db, "club_period_books", transform_club_period_books_func)
-    transform_collection(db, "club_discussions", transform_club_discussions_func)
-    transform_collection(db, "club_events", transform_club_events_func)
-    transform_collection(db, "club_reading_periods", transform_club_reading_periods_func)
-    transform_collection(db, "clubs", transform_clubs_func)
-    logger.info("Transformed club collections")
+    transform_collection("club_members", transform_club_members_func)
+    transform_collection("club_member_roles", transform_club_member_roles_func)
+    transform_collection("club_member_reads", transform_club_member_reads_func)
+    transform_collection("club_reads", transform_club_reads_func)
+    transform_collection("club_period_books", transform_club_period_books_func)
+    transform_collection("club_discussions", transform_club_discussions_func)
+    transform_collection("club_events", transform_club_events_func)
+    transform_collection("club_reading_periods", transform_club_reading_periods_func)
+    transform_collection("clubs", transform_clubs_func)
+    logger.info("Transformed club collections.")

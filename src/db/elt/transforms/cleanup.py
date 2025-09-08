@@ -1,6 +1,7 @@
 # Import modules
 from loguru import logger
-from src.elt.utils import connect_mongodb, remove_custom_ids, change_id_field
+from src.db.utils.connectors import connect_mongodb
+from src.db.utils.doc_transformers import remove_custom_ids, change_id_field
 
 # Connect to MongoDB
 db, client = connect_mongodb()

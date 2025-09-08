@@ -1,6 +1,7 @@
 # Import modules
 from loguru import logger
-from src.elt.utils import connect_mongodb, get_id_mappings, parse_multi_value_field
+from src.db.utils.connectors import connect_mongodb
+from src.db.utils.doc_transformers import get_id_mappings, parse_multi_value_field
 
 
 # Connect to MongoDB
@@ -43,7 +44,8 @@ def transform_awards():
                 "award_org": award.get("award_org"),
                 "award_description": award.get("award_description"),
                 "award_website": award.get("award_website"),
-                "award_categories": None if award.get("award_categories") == "ac001" else parse_multi_value_field(id_mappings, award.get("award_categories"), "award_categories"),
+                "award_categories": None if award.get("award_categories") == "ac001" else parse_multi_value_field(
+                    id_mappings, award.get("award_categories"), "award_categories"),
                 "award_statuses": parse_multi_value_field(id_mappings, award.get("award_statuses"), "award_statuses"),
                 "year_started": award.get("year_started"),
                 "year_ended": award.get("year_ended")
