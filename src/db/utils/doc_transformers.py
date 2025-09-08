@@ -7,7 +7,7 @@ from loguru import logger
 from dotenv import load_dotenv
 from src.db.utils.parsers import clean_document, to_datetime, to_int
 from src.db.utils.connectors import connect_mongodb
-from src.config import EXTRACTED_TABLES_DIR
+from src.config import RAW_TABLES_DIR
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
@@ -21,7 +21,7 @@ def refresh_collection(collection_name):
     Drops the specified collection and reloads it from a CSV file
     named <collection_name>.csv located in the given directory.
     """
-    csv_path = os.path.join(EXTRACTED_TABLES_DIR, f"{collection_name}.csv")
+    csv_path = os.path.join(RAW_TABLES_DIR, f"{collection_name}.csv")
 
     # Drop the collection
     db.drop_collection(collection_name)

@@ -43,3 +43,43 @@ def to_int(value):
     except ValueError as e:
         logger.error(f"Invalid integer value '{value}': {e}")
         return None
+
+
+def make_array_field(field_string):
+    """
+    Converts a comma-separated string into a list of trimmed strings.
+    """
+    if not field_string:
+        return []
+    return [item.strip() for item in field_string.split(',') if item.strip()]
+
+
+def make_subdocuments(string: str, field_key: str, registry, separator = ';'):
+    """
+    Parses a separator-separated string into a list of subdocuments
+    using the pattern and transform function defined in the subdoc_registry.
+    """
+    if not string:
+        return []
+
+    config = registry.get(field_key)
+    if not config or not callable(config.get('transform')):
+        logger.error(f"Invalid subdocument config for field '{field_key}'")
+        return []
+
+    pattern = config.get('pattern')
+    transform = config['transform']
+
+    entries = [entry.strip() for entry in string.split(separator) if entry.strip()]
+
+    if pattern:
+        transformed_list = []
+        for entry in entries:
+            match = pattern.match(entry)
+            if match:
+                transformed_list.append(transform(match))
+            else:
+                logger.warning(f"No match for entry: '{entry}' in field '{field_key}'")
+        return transformed_list
+    else:
+        return [transform(entry) for entry in entries]

@@ -1,248 +1,64 @@
 # Import modules
 import re
-from datetime import datetime
-from pymongo.errors import ConnectionFailure, ConfigurationError
-from loguru import logger
-from src.db.utils.connectors import connect_mongodb
-from src.db.utils.doc_transformers import refresh_collection
+from src.db.utils.parsers import to_int, make_array_field, make_subdocuments
+from src.db.utils.lookups import (build_lookup_map, resolve_lookup, resolve_creator,
+                                  transform_collection, resolve_awards, resolve_format_entry)
 
-# Connect to MongoDB
-db, client = connect_mongodb()
 
-# Define the ID field mappings for books collection
-def get_id_and_name_mappings(collection_names):
-    """
-    Fetches custom IDs, MongoDB ObjectIds, and names from specified collections
-    and returns a dictionary of mappings.
-    """
-    mappings = {}
-    for name in collection_names:
-        collection = db[name]
-        try:
-            # For all other collections, get the custom ID and the name or ObjectId
-            id_field_map = {
-                'genres': 'genre_id',
-                'creators': 'creator_id',
-                'tags': 'tag_id',
-                'awards': 'award_id',
-                'award_categories': 'acategory_id',
-                'award_statuses': 'astatus_id',
-                'book_collections': 'bcollection_id',
-                'formats': 'format_id',
-                'publishers': 'publisher_name',
-                'cover_art': 'cart_id',
-            }
+# Load and map all lookup collections
+lookup_registry = {
+    'creators': {'field': 'creator_id', 'get': ['_id', 'creator_firstname', 'creator_lastname']},
+    'book_collections': {'field': 'bcollection_name', 'get': ['_id', 'bcollection_name']},
+    'awards': {'field': 'award_id', 'get': ['_id', 'award_name']},
+    'award_categories': {'field': 'acategory_id', 'get': 'acategory_name'},
+    'award_statuses': {'field': 'astatus_id', 'get': 'astatus_name'},
+    'cover_art': {'field': 'cart_id', 'get': '_id'},
+    'publishers': {'field': 'publisher_name', 'get': ['_id', 'publisher_name']},
+}
 
-            id_field = id_field_map.get(name)
+lookup_data = {
+    collection: build_lookup_map(collection, config['field'], config['get'])
+    for collection, config in lookup_registry.items()
+}
 
-            # Special case for collections where we want to store both ObjectId and name
-            if name == 'creators':
-                cursor = collection.find({}, {'_id': 1, 'creator_id': 1, 'creator_firstname': 1, 'creator_lastname': 1})
-                mappings[name] = {doc['creator_id']: {'_id': doc['_id'], 'author_name': f"{doc['creator_firstname']} {doc['creator_lastname']}"} for doc in cursor}
-                logger.info(f"Created mapping for '{name}' collection.")
-                continue
 
-            if name == 'publishers':
-                cursor = collection.find({}, {'_id': 1, 'publisher_id': 1, 'publisher_name': 1})
-                mappings[name] = {doc['publisher_id']: {'_id': doc['_id'], 'publisher_name': doc['publisher_name']} for doc in cursor}
-                logger.info(f"Created mapping for '{name}' collection.")
-                continue
+# Subdoc registry
+subdoc_registry = {
+    'authors': {
+        'pattern': None,
+        'transform': lambda name: resolve_creator(name.strip(), 'author', lookup_data)
+    },
+    'awards': {
+        'pattern': re.compile(r'(aw\d+),\s*(ac\d+),\s*(\d{4}),\s*(as\d+)'),
+        'transform': lambda entry: resolve_awards(entry, lookup_data)
+    },
+    'contributors': {
+        'pattern': None,
+        'transform': lambda name: resolve_creator(name.strip(), 'contributor', lookup_data)
+    },
+    'format': {
+        'pattern': None,
+        'transform': lambda entry: resolve_format_entry(entry, lookup_data)
+    },
+}
 
-            # For all other collections, get the custom ID and the name or ObjectId
-            if name in ['genres', 'formats', 'languages']:
-                name_field = f"{name.rstrip('s')}_name"
-                cursor = collection.find({}, {id_field: 1, name_field: 1})
-                mappings[name] = {doc[id_field]: doc[name_field] for doc in cursor if id_field in doc}
-            else:
-                cursor = collection.find({}, {id_field: 1, '_id': 1})
-                mappings[name] = {doc[id_field]: doc['_id'] for doc in cursor if id_field in doc}
-
-            logger.info(f"Created mapping for '{name}' collection.")
-        except (ConnectionFailure, ConfigurationError) as e:
-            logger.warning(f"Could not create mapping for '{name}': {e}")
-            mappings[name] = {}
-        except (KeyError, TypeError, ValueError) as e:
-            logger.warning(f"Unexpected error while creating mapping for '{name}': {e}")
-            mappings[name] = {}
-    return mappings
-
-# Define the collections to get mappings for
-collections_to_map = [
-    "genres", "creators", "tags", "awards", "award_categories",
-    "award_statuses", "book_collections", "formats", "publishers",
-    "cover_art"
-]
-
-# Get the id mappings from the database
-id_mappings = get_id_and_name_mappings(collections_to_map)
-
-# Functions to transform data
-
-def parse_multi_value_field(field_string, collection_name):
-    """
-    Parses a comma-separated string of IDs and converts them into a list of
-    mapped values (ObjectIds or names) using the actual mapping dictionaries.
-    """
-    if not field_string:
-        return []
-
-    ids = [item.strip() for item in field_string.split(',')]
-    mapped_values = []
-    for old_id in ids:
-        if old_id in id_mappings[collection_name]:
-            mapped_values.append(id_mappings[collection_name].get(old_id))
-    return mapped_values
-
-def parse_awards(awards_string):
-    """
-    Parses the complex awards string into an array of embedded documents.
-    """
-    if not awards_string:
-        return []
-
-    awards_list = []
-    # Use a regex to extract the parts of each award entry
-    pattern = re.compile(r'(aw\d+),\s*(ac\d+),\s*(\d{4}),\s*(as\d+)')
-
-    for match in pattern.finditer(awards_string):
-        award_id, category_id, year, status_id = match.groups()
-
-        # Create an embedded document with ObjectId references and the year
-        if category_id == 'ac001':
-            award_doc = {
-            "award_id": id_mappings["awards"].get(award_id),
-            "year": int(year),
-            "status_id": id_mappings["award_statuses"].get(status_id)
-        }
-        else:
-            award_doc = {
-            "award_id": id_mappings["awards"].get(award_id),
-            "category_id": id_mappings["award_categories"].get(category_id),
-            "year": int(year),
-            "status_id": id_mappings["award_statuses"].get(status_id)
-        }
-
-        # Only add the document if the IDs were successfully mapped
-        if all(award_doc.values()):
-            awards_list.append(award_doc)
-
-    return awards_list
-
-def parse_formats(formats_string):
-    """
-    Parses the new 'format' string into a list of embedded documents.
-    """
-    if not formats_string:
-        return []
-
-    formats_list = []
-    raw_formats = [f.strip() for f in formats_string.split('|')]
-
-    for raw_format in raw_formats:
-        format_doc = {}
-        # Split by comma to get key:value pairs
-        parts = [p.strip() for p in raw_format.split(';')]
-
-        for part in parts:
-            if ':' in part:
-                key, value = [v.strip() for v in part.split(':', 1)]
-
-                # Convert keys and values
-                if key == 'format':
-                    format_doc['format_name'] = id_mappings['formats'].get(value)
-                elif key == 'edition':
-                    format_doc['edition'] = value
-                elif key == 'page_count':
-                    format_doc['page_count'] = int(value) if value.isdigit() else None
-                elif key == 'length':
-                    format_doc['length'] = value
-                elif key == 'language':
-                    format_doc['language_name'] = value
-                elif key == 'publisher':
-                    publisher_info = id_mappings['publishers'].get(value)
-                    if publisher_info:
-                        format_doc['publisher'] = {
-                            'publisher_id': publisher_info['_id'],
-                            'publisher_name': publisher_info['publisher_name']
-                        }
-                elif key == 'cover_art':
-                    format_doc['cover_art'] = id_mappings['cover_art'].get(value)
-                elif key == 'isbn_13':
-                    format_doc['isbn_13'] = value
-                elif key == 'asin':
-                    format_doc['asin'] = value
-                elif key == 'release_date':
-                    try:
-                        format_doc['release_date'] = datetime.strptime(value, '%Y-%m-%d')
-                    except ValueError:
-                        format_doc['release_date'] = None
-                elif key == 'translator':
-                    format_doc['translator'] = parse_multi_value_field(value, "creators")
-                elif key == 'narrator':
-                    format_doc['narrator'] = parse_multi_value_field(value, "creators")
-                elif key == 'illustrator':
-                    format_doc['illustrator'] = parse_multi_value_field(value, "creators")
-                elif key == 'cover artist':
-                    format_doc['cover artist'] = parse_multi_value_field(value, "creators")
-                elif key == 'editors':
-                    format_doc['editors'] = parse_multi_value_field(value, "creators")
-
-        # Only append the document if it has any data
-        if format_doc:
-            formats_list.append(format_doc)
-
-    return formats_list
-
-# Transform and import books
-def transform_and_import_books():
-    """
-    Main function to fetch raw data from the 'books' collection, transform it,
-    and insert it into a temporary collection before replacing the original.
-    """
-    try:
-        raw_books_collection = db["books"]
-        books_data = list(raw_books_collection.find({}))
-        logger.info(f"Fetched {len(books_data)} records from 'books' collection.")
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error(f"Failed to fetch data from 'books' collection: {e}")
-        return
-
-    transformed_books = []
-    for book in books_data:
-        try:
-            # New structure with both creator IDs and names
-            transformed_doc = {
-                "title": book.get("book_title"),
-                "author": parse_multi_value_field(book.get("author"), "creators"),
-                "genre_name": parse_multi_value_field(book.get("genre"), "genres"),
-                "collection": book.get(book.get("collection")),
-                "collection_index": book.get("collection_index"),
-                "description": book.get("description"),
-                "first_publication_date": datetime.strptime(book.get("first_publication_date"), '%Y-%m-%d') if book.get("first_publication_date") else None,
-                "tags": parse_multi_value_field(book.get("tags"), "tags"),
-                "awards": parse_awards(book.get("awards")),
-                "contributors": parse_multi_value_field(book.get("contributors"), "creators"),
-                "formats": parse_formats(book.get("format"))
-            }
-
-            # Remove keys with None, empty lists, or empty strings
-            cleaned_doc = {k: v for k, v in transformed_doc.items()
-                           if v is not None and v != [] and v != ''}
-            transformed_books.append(cleaned_doc)
-        except (KeyError, TypeError, ValueError) as e:
-            logger.warning(f"Failed to transform book data for book_id {book.get('book_id')}: {e}")
-            continue
-
-    if transformed_books:
-        # Drop the existing 'books' collection and insert transformed collection
-        db.drop_collection("books")
-        logger.info("Dropped existing 'books' collection.")
-
-        db["books"].insert_many(transformed_books)
-        logger.info(f"Successfully imported {len(transformed_books)} transformed books into the 'books' collection.")
-    else:
-        logger.warning("No books were transformed or imported.")
+# Transform function
+def transform_books_func(doc):
+    return {
+        "_id": doc.get("_id"),
+        "book_id": doc.get("book_id"),
+        "book_title": doc.get("book_title"),
+        "author": make_subdocuments(doc.get("author"), "authors", subdoc_registry, separator=','),
+        "genre": make_array_field(doc.get("genre")),
+        "collection": resolve_lookup('book_collections', doc.get("collection"), lookup_data),
+        "collection_index": to_int(doc.get("collection_index")),
+        "description": doc.get("description"),
+        "first_publication_date": doc.get("first_publication_date"),
+        "contributors": make_subdocuments(doc.get("contributors"), "contributors", subdoc_registry, separator=','),
+        "format": make_subdocuments(doc.get("format"), "format", subdoc_registry, separator='|'),
+        "awards": make_subdocuments(doc.get("awards"), "awards", subdoc_registry, separator='|'),
+        "tags": make_array_field(doc.get("tags")),
+    }
 
 if __name__ == "__main__":
-    refresh_collection('books')
-    transform_and_import_books()
+    transform_collection("books", transform_books_func)
