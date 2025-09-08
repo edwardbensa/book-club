@@ -9,6 +9,7 @@ transformed_collections_to_cleanup = {
     "books": "book_id",
     "cover_art": "cart_id",
     "users": "user_id",
+    "creators": "creator_id"
 }
 
 raw_collections_to_cleanup = {

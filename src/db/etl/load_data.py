@@ -19,32 +19,55 @@ for name in db.list_collection_names():
 # Collections that use custom string-based _id fields
 custom_id_collections = list(collections_to_modify.keys())
 
-def convert_fields(obj, collection_name: str):
+# Collections with ObjectIds in other fields
+objectid_registry = {
+    "books": ["collection._id", "author._id", "contributors._id",
+              "awards.award_id", "format.cover_art_id"],
+    "club_members": ["club_id", "user_id"],
+    "club_member_reads": ["club_id", "book_id", "user_id", "period_id"],
+    "club_discussions": ["club_id", "comments.user_id", "created_by", "book_reference"],
+    "club_events": ["created_by"],
+    "club_reading_periods": ["club_id", "created_by"],
+    "user_reads": ["book_id", "user_id", "period_id"],
+    "clubs": ["created_by", "club_moderators"],
+    "users": ["user_badges._id"],
+}
+
+def convert_fields(obj, collection_name: str, path=""):
     """
     Recursively converts:
-    - '_id' fields to ObjectId unless collection_name is in custom_id_collections
+    - _id fields to ObjectId unless collection_name is in custom_id_collections
+    - Fields listed in objectid_registry[collection_name] to ObjectId
     - Any field with 'date', 'timestamp', or 'created_at' in its name to datetime
     """
     if isinstance(obj, dict):
         new_obj = {}
         for key, value in obj.items():
-            if key == "_id":
-                if collection_name in custom_id_collections:
-                    new_obj["_id"] = value  # leave as-is
-                else:
-                    try:
-                        new_obj["_id"] = ObjectId(value)
-                    except (KeyError, TypeError, ValueError):
-                        new_obj["_id"] = value
+            full_path = f"{path}.{key}" if path else key
+
+            if key == "_id" and path == "" and collection_name not in custom_id_collections:
+                try:
+                    new_obj["_id"] = ObjectId(value)
+                except Exception:
+                    new_obj["_id"] = value
             elif any(tag in key.lower() for tag in ["date", "timestamp", "created_at"]):
                 new_obj[key] = to_datetime(value)
+            elif full_path in objectid_registry.get(collection_name, []):
+                if isinstance(value, list):
+                    new_obj[key] = [ObjectId(v) if isinstance(v, str) else v for v in value]
+                else:
+                    try:
+                        new_obj[key] = ObjectId(value)
+                    except Exception:
+                        new_obj[key] = value
             else:
-                new_obj[key] = convert_fields(value, collection_name)
+                new_obj[key] = convert_fields(value, collection_name, full_path)
         return new_obj
     elif isinstance(obj, list):
-        return [convert_fields(item, collection_name) for item in obj]
+        return [convert_fields(item, collection_name, path) for item in obj]
     else:
         return obj
+
 
 def load_transformed_collections():
     """

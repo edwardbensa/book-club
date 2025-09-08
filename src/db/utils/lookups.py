@@ -81,7 +81,7 @@ def resolve_awards(match, lookup_data: dict) -> dict:
 
     if  match.group(2) == 'ac001':
         subdoc = {
-            "award_id": award["_id"],  # type: ignore
+            "_id": award["_id"],  # type: ignore
             "award_name": award["award_name"],  # type: ignore
             "year": to_int(match.group(3)),
             "award_status": status

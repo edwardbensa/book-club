@@ -41,7 +41,7 @@ def main():
     Main function to run the ELT pipeline in sequence.
     """
     scripts_to_run = [
-        #"src/db/etl/extract_data.py",
+        "src/db/etl/extract_data.py",
         "src/db/etl/transforms/transform_clubs.py",
         "src/db/etl/transforms/transform_users.py",
         "src/db/etl/transforms/transform_books.py",

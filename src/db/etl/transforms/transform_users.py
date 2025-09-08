@@ -1,7 +1,7 @@
 # Import modules
 import re
 from src.db.utils.transforms import transform_collection
-from src.db.utils.parsers import to_int, make_subdocuments
+from src.db.utils.parsers import to_int, make_subdocuments, to_array
 from src.db.utils.lookups import resolve_lookup, load_lookup_data
 from src.db.utils.security import encrypt_pii, hash_password, latest_key_version
 
@@ -90,8 +90,7 @@ def transform_users_func(doc):
                                              subdoc_registry, separator='|'),
         "user_badges": make_subdocuments(doc.get("user_badges"), 'user_badges',
                                              subdoc_registry, separator='|'),
-        "user_genres": make_subdocuments(doc.get("user_genres"), 'user_genres',
-                                             subdoc_registry, separator=','),
+        "user_genres": to_array(doc.get("user_genres")),
         "date_joined": doc.get("date_joined"),
         "key_version": key_version
     }

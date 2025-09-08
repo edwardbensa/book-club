@@ -1,7 +1,7 @@
 # Import modules
 import re
 from datetime import datetime
-from src.db.utils.parsers import to_int, make_subdocuments, to_array
+from src.db.utils.parsers import to_int, to_array, make_subdocuments
 from src.db.utils.transforms import transform_collection
 from src.db.utils.lookups import load_lookup_data
 
@@ -173,8 +173,7 @@ def transform_clubs_func(doc):
         "club_handle": doc.get("club_handle"),
         "club_name": doc.get("club_name"),
         "club_creationdate": doc.get("club_creationdate"),
-        "club_genres": make_subdocuments(doc.get("club_genres"), "club_genres",
-                                         subdoc_registry, separator=","),
+        "club_genres": to_array(doc.get("club_genres")),
         "club_description": doc.get("club_description"),
         "club_visibility": doc.get("club_visibility"),
         "club_rules": doc.get("club_rules"),
