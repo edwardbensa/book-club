@@ -89,7 +89,7 @@ def transform_book_variants_func(doc):
         "variant_id": doc.get("variant_id"),
         "book_id": resolve_lookup('books', doc.get("book_id"), lookup_data),
         "title": doc.get("title"),
-        "isbn_13": doc.get("isbn_13"),
+        "isbn_13": to_int(doc.get("isbn_13")),
         "asin": doc.get("asin"),
         "format": doc.get("format"),
         "edition": doc.get("edition"),

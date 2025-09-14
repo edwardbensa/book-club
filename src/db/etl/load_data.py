@@ -22,6 +22,7 @@ custom_id_collections = list(collections_to_modify.keys())
 # Collections with ObjectIds in other fields
 objectid_registry = {
     "books": ["collection._id", "author._id", "contributors._id", "awards.award_id"],
+    "book_variants": ["book_id"],
     "club_members": ["club_id", "user_id"],
     "club_member_reads": ["club_id", "book_id", "user_id", "period_id"],
     "club_discussions": ["club_id", "comments.user_id", "created_by", "book_reference"],
