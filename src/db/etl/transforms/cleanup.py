@@ -7,13 +7,13 @@ from src.db.utils.transforms import remove_custom_ids, change_id_field, add_time
 # Collections to remove custom ids from
 transformed_collections_to_cleanup = {
     "books": "book_id",
-    "cover_art": "cart_id",
     "users": "user_id",
     "creators": "creator_id"
 }
 
 raw_collections_to_cleanup = {
     "book_collections": "bcollection_id",
+    "book_variants": "variant_id",
     "genres": "genre_id",
     "publishers": "publisher_id",
     "tags": "tag_id",
@@ -27,12 +27,13 @@ collections_to_modify = {
     "read_statuses": "rstatus_id",
     "club_event_types": "event_type_id",
     "club_event_statuses": "event_status_id",
-    "club_member_roles": "role_id",
+    "user_permissions": "permission_id",
+    "user_roles": "role_id",
 }
 
 collections_to_timestamp = [
     "book_collections", "genres", "club_event_types", "club_event_statuses",
-    "club_member_roles", "publishers", "tags", "cover_art", "awards"
+    "user_permissions", "user_roles", "publishers", "tags", "awards"
 ]
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import gspread
 from bson import ObjectId
 from loguru import logger
 from src.db.utils.connectors import connect_googlesheet
-from src.db.utils.misc import empty_directory
+from src.db.utils.files import wipe_directory
 from src.config import RAW_COLLECTIONS_DIR
 
 # Connect to Book Club DB spreadsheet
@@ -43,24 +43,22 @@ def extract_sheets_to_json(sheet_names):
 
 # Sheet groups
 book_sheets = [
-    "books", "creators", "creator_roles", "genres", "book_collections",
-    "awards", "award_categories", "award_statuses", "publishers",
-    "formats", "tags", "cover_art", "languages"
+    "books", "book_variants", "creators", "creator_roles", "genres", "book_collections",
+    "awards", "publishers", "formats", "tags", "languages"
 ]
 
 user_sheets = [
-    "users", "user_reads", "read_statuses", "user_badges"
+    "users", "user_reads", "read_statuses", "user_badges", "user_roles", "user_permissions"
 ]
 
 club_sheets = [
-    "clubs", "club_members", "club_member_roles", "club_member_reads",
-    "club_reads", "club_reading_periods", "club_period_books", "club_discussions",
-    "club_events", "club_event_types", "club_event_statuses", "club_badges"
+    "clubs", "club_members", "club_member_reads", "club_reading_periods", "club_period_books",
+    "club_discussions", "club_events", "club_event_types", "club_event_statuses", "club_badges"
 ]
 
 # Run extraction
 if __name__ == "__main__":
-    empty_directory(RAW_COLLECTIONS_DIR)
+    wipe_directory(RAW_COLLECTIONS_DIR)
     extract_sheets_to_json(book_sheets)
     time.sleep(15)
     extract_sheets_to_json(user_sheets)

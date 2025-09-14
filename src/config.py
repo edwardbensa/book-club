@@ -20,6 +20,7 @@ COVER_ART_DIR = EXTERNAL_DATA_DIR / "cover_art"
 RAW_TABLES_DIR = RAW_DATA_DIR / "raw_tables"
 RAW_COLLECTIONS_DIR = RAW_DATA_DIR / "raw_collections"
 TRANSFORMED_COLLECTIONS_DIR = PROCESSED_DATA_DIR / "transformed_collections"
+ETL_LOGS_DIR = PROJ_ROOT / "src" / "db" / "etl" / "logs"
 
 MODELS_DIR = PROJ_ROOT / "models"
 

@@ -1,8 +1,11 @@
 # Import modules
 import os
 import json
+from urllib.parse import urlparse
 from loguru import logger
-from src.db.utils.parsers import clean_document, to_int
+from src.db.utils.parsers import to_int
+from src.db.utils.files import generate_image_filename
+from src.db.utils.connectors import blobserviceclient_account_name as account_name
 from src.config import RAW_COLLECTIONS_DIR
 
 
@@ -73,65 +76,44 @@ def resolve_creator(creator_id: str, creator_role, lookup_data) -> dict:
 def resolve_awards(match, lookup_data: dict) -> dict:
     """
     Resolves award subdocument from regex match groups.
-    Omits award_category if category ID is 'ac001'.
+    Omits award_category if category ID is ''.
     """
-    award = resolve_lookup('awards', match.group(1), lookup_data)
-    category = resolve_lookup('award_categories', match.group(2), lookup_data)
-    status = resolve_lookup('award_statuses', match.group(4), lookup_data)
 
-    if  match.group(2) == 'ac001':
+    if  match.group(3) == '':
         subdoc = {
-            "_id": award["_id"],  # type: ignore
-            "award_name": award["award_name"],  # type: ignore
-            "year": to_int(match.group(3)),
-            "award_status": status
+            "_id": resolve_lookup('awards', match.group(1), lookup_data),
+            "award_name": match.group(2),
+            "year": to_int(match.group(4)),
+            "award_status": match.group(5)
         }
     else:
         subdoc = {
-                "award_id": award["_id"],  # type: ignore
-                "award_name": award["award_name"],  # type: ignore
-                "award_category": category,
-                "year": to_int(match.group(3)),
-                "award_status": status
+                "_id": resolve_lookup('awards', match.group(1), lookup_data),
+                "award_name": match.group(2),
+                "award_category": match.group(3),
+                "year": to_int(match.group(4)),
+                "award_status": match.group(5)
             }
 
     return subdoc
 
 
-def resolve_format_entry(entry: str, lookup_data: dict) -> dict:
+def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: str) -> str:
     """
-    Parses a format string and resolves all known fields.
-    Uses in-memory lookup_data for resolution.
-    Handles optional and multi-value creator roles.
+    Generates the Azure Blob Storage URL for a given document's image.
     """
-    fields = {}
-    for part in entry.split(';'):
-        if ':' not in part:
-            continue
-        key, value = part.strip().split(':', 1)
-        fields[key.strip()] = value.strip()
+    if img_type not in ["user", "club", "cover", "creator"]:
+        raise ValueError("Type must be either 'user', 'club', or 'cover'")
 
-    doc = {
-        "format": fields.get("format"),
-        "edition": fields.get("edition"),
-        "isbn_13": fields.get("isbn_13"),
-        "asin": fields.get("asin"),
-        "page_count": to_int(fields.get("page_count")),
-        "length": fields.get("length"),
-        "release_date": fields.get("release_date"),
-        "publisher": resolve_lookup("publishers", fields.get("publisher"), lookup_data),
-        "language": fields.get("language"),
-        "cover_art_id": resolve_lookup("cover_art", fields.get("cover_art"), lookup_data),
-        "date_added": fields.get("date_added")
-    }
+    try:
+        if not url_str or not isinstance(url_str, str) or not url_str.strip():
+            return ""
+        parsed_url = urlparse(url_str)
+        extension = os.path.splitext(parsed_url.path)[1] or ".jpg"
 
-    for role in ["translator", "narrator", "illustrator", "cover_artist", "editors"]:
-        if role in fields:
-            creator_ids = [cid.strip() for cid in fields[role].split(',')]
-            singular_role = role[:-1] if role.endswith('s') else role
-            doc[role] = [
-                resolve_creator(cid, singular_role, lookup_data)
-                for cid in creator_ids
-            ]
-
-    return clean_document(doc)
+        blob_name = f"{generate_image_filename(doc, img_type)}{extension}"
+        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}"
+        return url
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error(f"Failed to generate image URL: {e}")
+        return ""

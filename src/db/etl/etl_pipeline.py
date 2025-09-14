@@ -4,7 +4,7 @@
 import subprocess
 import sys
 from loguru import logger
-from src.db.utils.misc import empty_directory
+from src.db.utils.files import wipe_directory
 from src.config import TRANSFORMED_COLLECTIONS_DIR
 
 def run_script(script_path):
@@ -47,7 +47,7 @@ def main():
         "src/db/etl/transforms/transform_books.py",
         "src/db/etl/transforms/transform_creators.py",
         "src/db/etl/transforms/transform_awards.py",
-        "src/db/etl/transforms/transform_covers.py",
+        "src/db/etl/utilityscripts/sync_images.py",
         "src/db/etl/transforms/cleanup.py",
         "src/db/etl/load_data.py"
     ]
@@ -60,5 +60,5 @@ def main():
     logger.success("ELT pipeline completed successfully!")
 
 if __name__ == "__main__":
-    empty_directory(TRANSFORMED_COLLECTIONS_DIR)
+    wipe_directory(TRANSFORMED_COLLECTIONS_DIR)
     main()

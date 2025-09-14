@@ -50,6 +50,19 @@ def to_int(value):
         return None
 
 
+def to_float(value):
+    """
+    Converts a value to a float. Returns None if the input is None or an empty string.
+    """
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except ValueError as e:
+        logger.error(f"Invalid float value '{value}': {e}")
+        return None
+
+
 def to_array(field_string):
     """
     Converts a comma-separated string into a list of trimmed strings.
@@ -65,6 +78,9 @@ def make_subdocuments(string: str, field_key: str, registry, separator = ';'):
     using the pattern and transform function defined in the subdoc_registry.
     """
     if not string:
+        return []
+
+    if string == '':
         return []
 
     config = registry.get(field_key)

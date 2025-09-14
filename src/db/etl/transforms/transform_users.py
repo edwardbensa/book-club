@@ -1,5 +1,6 @@
 # Import modules
 import re
+from datetime import datetime
 from src.db.utils.transforms import transform_collection
 from src.db.utils.parsers import to_int, make_subdocuments, to_array
 from src.db.utils.lookups import resolve_lookup, load_lookup_data
@@ -12,7 +13,8 @@ lookup_registry = {
     'genres': {'field': 'genre_name', 'get': ['_id', 'genre_name']},
     'users': {'field': 'user_id', 'get': '_id'},
     'user_badges': {'field': 'badge_name', 'get': ['_id', 'badge_name']},
-    'read_statuses': {'field': 'rstatus_id', 'get': 'rstatus_name'}
+    'read_statuses': {'field': 'rstatus_id', 'get': 'rstatus_name'},
+    'clubs': {'field': 'club_id', 'get': '_id'},
 }
 
 lookup_data = load_lookup_data(lookup_registry)
@@ -42,6 +44,13 @@ subdoc_registry = {
     'user_genres': {
         'pattern': None,
         'transform': lambda genre_name: resolve_lookup('genres', genre_name, lookup_data)
+    },
+    "user_clubs": {
+        "pattern": re.compile(r"_id:\s*(\w+),\s*role:\s*(\w+)"),
+        "transform": lambda match: {
+            "_id": lookup_data["users"].get(match.group(1)),
+            "role": match.group(2)
+        }
     }
 }
 
@@ -64,6 +73,20 @@ def transform_user_reads_func(doc):
         "notes": doc.get("notes"),
     }
     return transformed_doc
+
+
+def transform_user_roles_func(doc):
+    """
+    Transforms a user_roles document to the desired structure.
+    """
+    return {
+        "_id": doc.get("_id"),
+        "role_id": doc.get("role_id"),
+        "role_name": doc.get("role_name"),
+        "role_permissions": to_array(doc.get("role_permissions")),
+        "role_description": doc.get("role_description"),
+        "created_at": str(datetime.now())
+    }
 
 
 def transform_users_func(doc):
@@ -91,7 +114,11 @@ def transform_users_func(doc):
         "user_badges": make_subdocuments(doc.get("user_badges"), 'user_badges',
                                              subdoc_registry, separator='|'),
         "user_genres": to_array(doc.get("user_genres")),
+        "user_clubs": make_subdocuments(doc.get("user_clubs"), 'user_clubs',
+                                        subdoc_registry, separator='|'),
         "date_joined": doc.get("date_joined"),
+        "last_active_date": doc.get("last_active_date"),
+        "is_admin": bool(doc.get("is_admin", False)),
         "key_version": key_version
     }
     return transformed_doc
@@ -100,4 +127,5 @@ def transform_users_func(doc):
 # Transform 'user_reads' collection
 if __name__ == "__main__":
     transform_collection("user_reads", transform_user_reads_func)
+    transform_collection("user_roles", transform_user_roles_func)
     transform_collection("users", transform_users_func)

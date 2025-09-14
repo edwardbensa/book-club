@@ -39,7 +39,14 @@ subdoc_registry = {
     "club_genres": {
         "pattern": None,
         "transform": lambda genre_name: lookup_data["genres"].get(genre_name.strip())
-    }
+    },
+    "join_requests": {
+        "pattern": re.compile(r"user_id:\s*(\w+),\s*timestamp:\s*(\d{4}-\d{2}-\d{2})"),
+        "transform": lambda match: {
+            "user_id": lookup_data["users"].get(match.group(1)),
+            "timestamp": match.group(2)
+        }
+    },
 }
 
 # Transformation functions
@@ -57,19 +64,6 @@ def transform_club_members_func(doc):
         "created_at": str(datetime.now())
     }
 
-def transform_club_member_roles_func(doc):
-    """
-    Transforms a club_member_roles document to the desired structure.
-    """
-    return {
-        "_id": doc.get("_id"),
-        "role_id": doc.get("role_id"),
-        "role_name": doc.get("role_name"),
-        "role_permissions": to_array(doc.get("role_permissions")),
-        "role_description": doc.get("role_description"),
-        "created_at": str(datetime.now())
-    }
-
 def transform_club_member_reads_func(doc):
     """
     Transforms a club_member_reads document to the desired structure.
@@ -84,19 +78,6 @@ def transform_club_member_reads_func(doc):
         "created_at": str(datetime.now())
     }
 
-def transform_club_reads_func(doc):
-    """
-    Transforms a club_reads document to the desired structure.
-    """
-    return {
-        "_id": doc.get("_id"),
-        "club_id": lookup_data["clubs"].get(doc.get("club_id")),
-        "book_id": lookup_data["books"].get(doc.get("book_id")),
-        "period_id": lookup_data["club_reading_periods"].get(doc.get("period_id")),
-        "period_enddate": doc.get("period_enddate"),
-        "created_at": str(datetime.now())
-    }
-
 def transform_club_period_books_func(doc):
     """
     Transforms a club_period_books document to the desired structure.
@@ -106,6 +87,8 @@ def transform_club_period_books_func(doc):
         "club_id": lookup_data["clubs"].get(doc.get("club_id")),
         "book_id": lookup_data["books"].get(doc.get("book_id")),
         "period_id": lookup_data["club_reading_periods"].get(doc.get("period_id")),
+        "period_startdate": doc.get("period_startdate"),
+        "period_enddate": doc.get("period_enddate"),
         "selected_by": lookup_data["users"].get(doc.get("user_id")),
         "selection_method": doc.get("selection_method"),
         "votes": make_subdocuments(doc.get("votes"), "votes", subdoc_registry, separator=";"),
@@ -126,7 +109,8 @@ def transform_club_discussions_func(doc):
         "topic_description": doc.get("topic_description"),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
         "created_at": doc.get("created_at"),
-        "comments": make_subdocuments(doc.get("comments"), "club_discussions", subdoc_registry, separator="|"),
+        "comments": make_subdocuments(doc.get("comments"), "club_discussions",
+                                      subdoc_registry, separator="|"),
         "book_reference": lookup_data["books"].get(doc.get("book_reference"))
     }
 
@@ -180,6 +164,9 @@ def transform_clubs_func(doc):
         "club_moderators": [lookup_data["users"].get(user) for user
                             in to_array(doc.get("club_moderators"))],
         "club_badges": doc.get("club_badges"),
+        "club_member_permissions": to_array(doc.get("club_member_permissions")),
+        "join_requests": make_subdocuments(doc.get("join_requests"), "join_requests",
+                                           subdoc_registry, separator=";"),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
         "created_at": str(datetime.now())
     }
@@ -187,9 +174,7 @@ def transform_clubs_func(doc):
 # Run all transformations
 if __name__ == "__main__":
     transform_collection("club_members", transform_club_members_func)
-    transform_collection("club_member_roles", transform_club_member_roles_func)
     transform_collection("club_member_reads", transform_club_member_reads_func)
-    transform_collection("club_reads", transform_club_reads_func)
     transform_collection("club_period_books", transform_club_period_books_func)
     transform_collection("club_discussions", transform_club_discussions_func)
     transform_collection("club_events", transform_club_events_func)
