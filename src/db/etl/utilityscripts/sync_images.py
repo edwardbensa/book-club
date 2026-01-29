@@ -1,3 +1,5 @@
+"""Sync images with Azure Blob Storage"""
+
 # Import necessary modules
 from loguru import logger
 from src.db.utils.connectors import connect_azure_blob, sync_images
@@ -11,7 +13,7 @@ CONTAINER_NAME = 'cover-art'
 
 
 if __name__ == "__main__":
-    download_images("book_variants", "cover_url", "cover", COVER_ART_DIR)
+    download_images("book_versions", "cover_url", "cover", COVER_ART_DIR)
     sync_images(blob_service_client, CONTAINER_NAME, COVER_ART_DIR, 'cover')
     selective_delete(COVER_ART_DIR, "cover")
 

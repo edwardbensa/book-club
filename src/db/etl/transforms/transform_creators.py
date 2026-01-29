@@ -1,4 +1,6 @@
-# Import modules
+"""Transform creators"""
+
+# Imports
 from src.db.utils.parsers import to_array
 from src.db.utils.transforms import transform_collection
 
@@ -11,11 +13,11 @@ def transform_creators_func(doc):
     return {
         "_id": doc.get("_id"),
         "creator_id": doc.get("creator_id"),
-        "creator_firstname": doc.get("creator_firstname"),
-        "creator_lastname": doc.get("creator_lastname"),
-        "creator_bio": doc.get("creator_bio"),
-        "creator_website": doc.get("creator_website"),
-        "creator_roles": to_array(doc.get("creator_roles"))
+        "firstname": doc.get("firstname"),
+        "lastname": doc.get("lastname"),
+        "bio": doc.get("bio"),
+        "website": doc.get("website"),
+        "roles": to_array(doc.get("roles"))
     }
 
 # Run transformation

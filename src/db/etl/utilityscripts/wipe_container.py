@@ -1,4 +1,6 @@
-# Import necessary modules
+"""Container wipe script"""
+
+# Imports
 from loguru import logger
 from src.db.utils.connectors import connect_azure_blob, wipe_container
 

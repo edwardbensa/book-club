@@ -1,13 +1,11 @@
-# import modules
-import os
+"""Security utility functions"""
+
+# Imports
 import json
 import bcrypt
-from dotenv import load_dotenv
 from cryptography.fernet import Fernet
+from src.config import key_registry_path
 
-# Load environment variables
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../../.env'))
-key_registry_path = os.getenv("ENCRYPTION_KEYS")
 
 # Load key registry
 if key_registry_path is None:

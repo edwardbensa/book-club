@@ -1,5 +1,8 @@
-# Import modules
+"""Connection utility functions"""
+
+# Imports
 import os
+import sys
 import json
 from typing import Tuple
 import gspread
@@ -8,16 +11,12 @@ from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ConfigurationError
+from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable, AuthError
 from loguru import logger
-from dotenv import load_dotenv
-from src.config import ETL_LOGS_DIR
+from src.config import (ETL_LOGS_DIR, gsheet_cred, mongodb_uri, azure_str,
+                        neo4j_uri, neo4j_user, neo4j_pwd)
 
-# Load environment variables from .env file
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../../.env'))
-
-gsheet_cred = os.getenv("GSHEET_CRED")
-mongodb_uri = os.getenv("MONGODB_URI")
-azure_storage_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 
 def connect_mongodb():
     """
@@ -31,7 +30,26 @@ def connect_mongodb():
         return db, client
     except (ConnectionFailure, ConfigurationError)  as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
-        exit()
+        sys.exit()
+
+def connect_auradb():
+    """
+    Connects to Neo4j AuraDB and creates a driver.
+    """
+    if neo4j_uri is None or neo4j_user is None or neo4j_pwd is None:
+        raise ValueError("neo4j_user and neo4j_pwd must not be None")
+    uri = neo4j_uri
+    auth = (neo4j_user, neo4j_pwd)
+
+    try:
+        driver = GraphDatabase.driver(uri, auth=auth)
+        with driver.session() as session:
+            session.run("RETURN 1")
+        logger.info("Successfully connected to AuraDB")
+        return driver
+    except (ServiceUnavailable, AuthError) as e:
+        logger.error(f"Failed to connect to AuraDB: {e}")
+        sys.exit()
 
 
 def connect_azure_blob():
@@ -39,15 +57,13 @@ def connect_azure_blob():
     Connects to Azure Blob Storage and returns the BlobServiceClient.
     """
     try:
-        blob_service_client = BlobServiceClient.from_connection_string(
-            azure_storage_connection_string) # type: ignore
+        blob_service_client = BlobServiceClient.from_connection_string(azure_str) # type: ignore
         logger.info("Successfully connected to Azure Blob Storage.")
         return blob_service_client
     except (ConnectionFailure, ConfigurationError) as e:
         logger.error(f"Failed to connect to Azure Blob Storage: {e}")
-        exit()
+        sys.exit()
 
-blobserviceclient_account_name = connect_azure_blob().account_name if azure_storage_connection_string else None
 
 def make_blob_public(container_client, blob_name):
     """
@@ -72,7 +88,7 @@ def connect_googlesheet():
         # Google Sheets authorization
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_name(gsheet_cred, scope)  # type: ignore
-        client_sheet = gspread.authorize(creds)
+        client_sheet = gspread.authorize(creds) # type: ignore
 
         # Open spreadsheet
         spreadsheet = client_sheet.open("Book Club DB")
@@ -175,7 +191,7 @@ def sync_images(blob_service_client, container_name, source_directory, img_type)
 
     try:
         container_client = blob_service_client.get_container_client(container_name)
-        logger.info(f"Syncing container '{container_name}' with local directory '{source_directory}'...")
+        logger.info(f"Syncing container '{container_name}' with local dir '{source_directory}'...")
 
         # List existing blobs in container
         existing_blobs = set(blob.name for blob in container_client.list_blobs())
@@ -205,8 +221,9 @@ def sync_images(blob_service_client, container_name, source_directory, img_type)
             else:
                 logger.debug(f"Skipped non-image or missing file: {filename}")
 
-        logger.success(f"Sync complete. {len(files_to_upload)} uploaded, {len(blobs_to_delete)} deleted.")
+        logger.success(f"Sync complete. {len(files_to_upload)} files uploaded, \
+                       {len(blobs_to_delete)} files deleted.")
 
     except AzureError as e:
         logger.error(f"Critical error accessing container '{container_name}': {e}")
-        exit()
+        sys.exit()

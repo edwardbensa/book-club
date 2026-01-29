@@ -8,9 +8,12 @@ azure.storage.blob
 pymongo
 gspread
 oauth2client
-bson
+bcrypt
 pandas
 numpy
 requests
 datetime
--e .
+streamlit
+seaborn
+ipykernel
+neo4j~=5.28

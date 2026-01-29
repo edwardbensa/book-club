@@ -1,12 +1,14 @@
+"""Lookup utlity functions"""
+
 # Import modules
 import os
 import json
 from urllib.parse import urlparse
 from loguru import logger
-from src.db.utils.parsers import to_int
-from src.db.utils.files import generate_image_filename
-from src.db.utils.connectors import blobserviceclient_account_name as account_name
 from src.config import RAW_COLLECTIONS_DIR
+from .parsers import to_int
+from .files import generate_image_filename
+from .connectors import connect_azure_blob
 
 
 # Load lookup collections from disk
@@ -56,7 +58,7 @@ def resolve_lookup(collection_name, input_string, lookup_data):
     return lookup_data.get(collection_name, {}).get(input_string)
 
 
-def resolve_creator(creator_id: str, creator_role, lookup_data) -> dict:
+def resolve_creator(creator_id: str, lookup_data) -> dict:
     """
     Resolves a creator by custom creator_id and returns:
     - _id: MongoDB ObjectId
@@ -66,10 +68,10 @@ def resolve_creator(creator_id: str, creator_role, lookup_data) -> dict:
     if not doc:
         logger.warning(f"No creator found for ID '{creator_id}'")
         return {}
-    full_name = f"{doc.get('creator_firstname', '').strip()} {doc.get('creator_lastname', '').strip()}"
+    full_name = f"{doc.get('firstname', '').strip()} {doc.get('lastname', '').strip()}"
     return {
         "_id": doc["_id"],
-        f"{creator_role}_name": full_name
+        "name": full_name
     }
 
 
@@ -97,6 +99,7 @@ def resolve_awards(match, lookup_data: dict) -> dict:
 
     return subdoc
 
+blobserviceclient_account_name = connect_azure_blob().account_name
 
 def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: str) -> str:
     """
@@ -112,6 +115,7 @@ def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: s
         extension = os.path.splitext(parsed_url.path)[1] or ".jpg"
 
         blob_name = f"{generate_image_filename(doc, img_type)}{extension}"
+        account_name = blobserviceclient_account_name
         url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}"
         return url
     except (KeyError, TypeError, ValueError) as e:

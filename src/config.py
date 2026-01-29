@@ -1,14 +1,25 @@
-from pathlib import Path
+"""Project config"""
 
+# Imports
+import os
+from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
-# Load environment variables from .env file if it exists
+# Load environment variables
 load_dotenv()
+gsheet_cred = os.getenv("GSHEET_CRED")
+mongodb_uri = os.getenv("MONGODB_URI")
+azure_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+neo4j_uri = os.getenv("NEO4J_URI")
+neo4j_user = os.getenv("NEO4J_USERNAME")
+neo4j_pwd = os.getenv("NEO4J_PASSWORD")
+key_registry_path = os.getenv("ENCRYPTION_KEYS")
+
 
 # Paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
-logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
+#logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
 
 DATA_DIR = PROJ_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"

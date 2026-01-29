@@ -1,9 +1,11 @@
+"""Google Sheets data extraction"""
+
 # Import modules
 import os
 import json
 import time
 import gspread
-from bson import ObjectId
+from bson.objectid import ObjectId
 from loguru import logger
 from src.db.utils.connectors import connect_googlesheet
 from src.db.utils.files import wipe_directory
@@ -15,8 +17,7 @@ spreadsheet = connect_googlesheet()
 # Function to extract sheets and save directly to JSON
 def extract_sheets_to_json(sheet_names):
     """
-    Extracts data from specified sheets and saves them directly to RAW_COLLECTIONS_DIR as JSON.
-    Each document is assigned a unique _id.
+    Extracts data from specified sheets, adds ObjectId, saves to RAW_COLLECTIONS_DIR as JSON.
     """
     for name in sheet_names:
         try:
@@ -27,7 +28,7 @@ def extract_sheets_to_json(sheet_names):
                 documents = []
                 for row in records:
                     doc = {"_id": str(ObjectId())}
-                    doc.update(row)
+                    doc.update(row) # type: ignore
                     documents.append(doc)
 
                 output_path = os.path.join(RAW_COLLECTIONS_DIR, f"{name}.json")
@@ -43,7 +44,7 @@ def extract_sheets_to_json(sheet_names):
 
 # Sheet groups
 book_sheets = [
-    "books", "book_variants", "creators", "creator_roles", "genres", "book_collections",
+    "books", "book_versions", "creators", "creator_roles", "genres", "book_series",
     "awards", "publishers", "formats", "tags", "languages"
 ]
 
@@ -60,8 +61,8 @@ club_sheets = [
 if __name__ == "__main__":
     wipe_directory(RAW_COLLECTIONS_DIR)
     extract_sheets_to_json(book_sheets)
-    time.sleep(15)
+    time.sleep(10)
     extract_sheets_to_json(user_sheets)
-    time.sleep(30)
+    time.sleep(10)
     extract_sheets_to_json(club_sheets)
     logger.success("All raw collections saved to disk.")

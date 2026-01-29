@@ -1,4 +1,6 @@
-# Import modules
+"""File management utility functions"""
+
+# Imports
 import os
 import json
 import shutil

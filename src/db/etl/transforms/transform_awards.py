@@ -1,3 +1,5 @@
+"""Transform awards"""
+
 # Import modules
 from src.db.utils.parsers import to_int, to_array
 from src.db.utils.transforms import transform_collection

@@ -1,4 +1,6 @@
-# Import modules
+"""Collection cleanup"""
+
+# Imports
 from loguru import logger
 from src.config import RAW_COLLECTIONS_DIR, TRANSFORMED_COLLECTIONS_DIR
 from src.db.utils.transforms import remove_custom_ids, change_id_field, add_timestamp
@@ -9,11 +11,11 @@ transformed_collections_to_cleanup = {
     "books": "book_id",
     "users": "user_id",
     "creators": "creator_id",
-    "book_variants": "variant_id",
+    "book_versions": "version_id",
 }
 
 raw_collections_to_cleanup = {
-    "book_collections": "bcollection_id",
+    "book_series": "bseries_id",
     "genres": "genre_id",
     "publishers": "publisher_id",
     "tags": "tag_id",

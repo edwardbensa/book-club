@@ -1,4 +1,6 @@
-# Import modules
+"""Transform clubs"""
+
+# Imports
 import re
 from datetime import datetime
 from src.db.utils.parsers import to_int, to_array, make_subdocuments

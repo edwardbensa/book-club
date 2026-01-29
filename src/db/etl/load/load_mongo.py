@@ -1,3 +1,5 @@
+'''Loads transformed JSON collections into MongoDB'''
+
 # Import modules
 import json
 from pathlib import Path
@@ -21,14 +23,15 @@ custom_id_collections = list(collections_to_modify.keys())
 
 # Collections with ObjectIds in other fields
 objectid_registry = {
-    "books": ["collection._id", "author._id", "contributors._id", "awards.award_id"],
-    "book_variants": ["book_id"],
+    "books": ["series._id", "author._id", "contributors._id", "awards._id"],
+    "book_versions": ["book_id", "publisher._id",],
     "club_members": ["club_id", "user_id"],
     "club_member_reads": ["club_id", "book_id", "user_id", "period_id"],
     "club_discussions": ["club_id", "comments.user_id", "created_by", "book_reference"],
     "club_events": ["created_by"],
     "club_reading_periods": ["club_id", "created_by"],
-    "user_reads": ["book_id", "user_id", "period_id"],
+    "club_period_books": ["club_id", "book_id", "period_id"],
+    "user_reads": ["book_id", "user_id", "version_id"],
     "clubs": ["created_by", "club_moderators"],
     "users": ["user_badges._id"],
 }
@@ -48,7 +51,7 @@ def convert_fields(obj, collection_name: str, path=""):
             if key == "_id" and path == "" and collection_name not in custom_id_collections:
                 try:
                     new_obj["_id"] = ObjectId(value)
-                except Exception:
+                except (TypeError, ValueError):
                     new_obj["_id"] = value
             elif any(tag in key.lower() for tag in ["date", "timestamp", "created_at"]):
                 new_obj[key] = to_datetime(value)
@@ -58,7 +61,7 @@ def convert_fields(obj, collection_name: str, path=""):
                 else:
                     try:
                         new_obj[key] = ObjectId(value)
-                    except Exception:
+                    except (TypeError, ValueError):
                         new_obj[key] = value
             else:
                 new_obj[key] = convert_fields(value, collection_name, full_path)

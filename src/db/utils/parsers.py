@@ -1,3 +1,5 @@
+"""Parsing utility functions"""
+
 # Import modules
 from datetime import datetime
 from loguru import logger
@@ -5,11 +7,17 @@ from loguru import logger
 
 # PARSING AND CLEANING FUNCTIONS
 
-def clean_document(doc):
+def clean_document(doc: dict):
     """
     Removes keys with None, empty lists, or empty strings from a document.
     """
-    return {k: v for k, v in doc.items() if v is not None and v != [] and v != ''}
+    clean_doc = {k: v for k, v in doc.items() if v is not None and v != [] and v != ''}
+
+    old_keys = list(doc.keys())
+    new_keys = list(clean_doc.keys())
+    removed_keys = [k for k in old_keys if k not in new_keys]
+
+    return clean_doc, removed_keys
 
 
 def to_datetime(date_string):
@@ -102,8 +110,8 @@ def make_subdocuments(string: str, field_key: str, registry, separator = ';'):
             else:
                 logger.warning(f"No match for entry: '{entry}' in field '{field_key}'")
         return transformed_list
-    else:
-        return [transform(entry) for entry in entries]
+
+    return [transform(entry) for entry in entries]
 
 
 def make_array(string: str, field_key: str, registry, separator=';'):

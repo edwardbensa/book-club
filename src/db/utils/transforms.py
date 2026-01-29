@@ -1,3 +1,5 @@
+"""Transform utility functions"""
+
 # Import modules
 import os
 import json
@@ -7,6 +9,7 @@ from loguru import logger
 from src.db.utils.parsers import clean_document
 from src.config import RAW_COLLECTIONS_DIR, TRANSFORMED_COLLECTIONS_DIR
 
+# pylint: disable=line-too-long
 
 def transform_collection(collection_name: str, transform_func):
     """
@@ -22,13 +25,20 @@ def transform_collection(collection_name: str, transform_func):
             raw_docs = json.load(f)
 
         transformed = []
+        removed_keys = []
         for doc in raw_docs:
-            transformed.append(clean_document(transform_func(doc)))
+            clean_doc, removed = clean_document(transform_func(doc))
+            transformed.append(clean_doc)
+            removed_keys.extend(removed)
+
+        counts = {item: removed_keys.count(item) for item in sorted(set(removed_keys))}
+        if counts != {}:
+            logger.warning(f"The following keys were removed: {counts}")
 
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(transformed, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"Transformed {len(transformed)} records → {output_path}")
+        logger.info(f"Transformed {len(transformed)} records -> {output_path}")
 
     except FileNotFoundError:
         logger.warning(f"Raw JSON file not found: {input_path}")
