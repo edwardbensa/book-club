@@ -2,9 +2,10 @@
 
 # Imports
 import datetime
+from src.db.utils.security import decrypt_field
 from src.db.utils.connectors import connect_mongodb, connect_auradb
 from src.db.utils.polyglot import (fetch_from_mongo, upsert_nodes, create_relationships,
-                                   user_reads_relationships, clear_all_nodes)
+                                   user_reads_relationships, user_badges_relationships, clear_all_nodes)
 
 
 # Connect to databases
@@ -57,11 +58,12 @@ creator_roles = fetch_from_mongo(db["creator_roles"])
 publishers = fetch_from_mongo(db["publishers"])
 formats = fetch_from_mongo(db["formats"])
 languages = fetch_from_mongo(db["languages"])
+user_badges = fetch_from_mongo(db["user_badges"])
 
 excluded_user_fields = [
-    "user_firstname", "user_lastname", "user_emailaddress", "user_password",
-    "user_dob", "user_gender", "user_city", "user_state", "user_country",
-    "is_admin", "key_version", "last_active_date"
+    "firstname", "lastname", "email_address", "password",
+    "dob", "gender", "city", "state",
+    "is_admin", "last_active_date"
     ]
 excluded_club_fields = [
     "club_member_permissions", "join_requests", "club_moderators",
@@ -77,6 +79,9 @@ current_year = datetime.date.today().year
 for user in users:
     goals = user["reading_goal"]
     user["reading_goal"] = next((g["goal"] for g in goals if g["year"] == current_year), "N/A")
+    country = decrypt_field(user["country"], user["key_version"])
+    user["country"] = country
+    user.pop("key_version", None)
 
 
 # Upsert nodes to Neo4j
@@ -93,6 +98,7 @@ with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "Language", languages)
     session.execute_write(upsert_nodes, "User", users)
     session.execute_write(upsert_nodes, "Club", clubs)
+    session.execute_write(upsert_nodes, "UserBadge", user_badges)
 
 # Edge maps
 book_genre_map = {"labels": ["Book", "Genre"], "props": ["genre", "genre_name"]}
@@ -106,6 +112,7 @@ bv_publisher_map = {"labels": ["BookVersion", "Publisher"], "props": ["publisher
 bv_language_map = {"labels": ["BookVersion", "Language"], "props": ["language", "language_name"]}
 bv_format_map = {"labels": ["BookVersion", "Format"], "props": ["format", "format_name"]}
 creator_cr_map = {"labels": ["Creator", "CreatorRole"], "props": ["roles", "cr_name"]}
+user_club_map = {"labels": ["User", "Club"], "props": ["club_ids", "_id"]}
 
 # Create node relationships
 with neo4j_driver.session() as session:
@@ -120,8 +127,10 @@ with neo4j_driver.session() as session:
     session.execute_write(create_relationships, bv_language_map, "HAS_LANGUAGE")
     session.execute_write(create_relationships, bv_format_map, "HAS_FORMAT")
     session.execute_write(create_relationships, creator_cr_map, "HAS_ROLE")
+    session.execute_write(create_relationships, user_club_map, "MEMBER_OF")
 
     session.execute_write(user_reads_relationships, user_reads)
+    session.execute_write(user_badges_relationships, users)
 
 
 neo4j_driver.close()

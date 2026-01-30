@@ -50,6 +50,7 @@ def main():
         "src/db/etl/utilityscripts/sync_images.py",
         "src/db/etl/transforms/cleanup.py",
         "src/db/etl/load/load_mongo.py"
+        "src/db/etl/load/load_aura.py"
     ]
 
     for script in scripts_to_run:

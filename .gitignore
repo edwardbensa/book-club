@@ -214,3 +214,5 @@ _deprecated/
 secrets/
 data
 modeling/
+_deprecated/
+_testing/

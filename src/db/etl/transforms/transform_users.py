@@ -50,7 +50,7 @@ subdoc_registry = {
         'transform': lambda genre_name: resolve_lookup('genres', genre_name, lookup_data)
     },
     "clubs": {
-        "pattern": re.compile(r"_id:\s*(\w+),\s*role:\s*(\w+)"),
+        "pattern": re.compile(r"_id:\s*(\w+),\s*role:\s*(\w+),\s*joined:\s*(\d{4}-\d{2}-\d{2})"),
         "transform": lambda match: {
             "_id": lookup_data["clubs"].get(match.group(1)),
             "role": match.group(2)

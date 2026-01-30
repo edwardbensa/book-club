@@ -141,47 +141,9 @@ def create_relationships(tx, rel_map, rel: str):
 
 def user_reads_relationships(tx, user_reads):
     """
-    Create relationships between users and the books they've read.
-    """
-
-    rel_map = {
-        "DNF": "DID_NOT_FINISH",
-        "Read": "HAS_READ",
-        "Paused": "HAS_PAUSED",
-        "Reading": "IS_READING",
-        "To Read": "WANTS_TO_READ"
-    }
-
-    query = """
-    MATCH (u:User {_id: $user_id})
-    MATCH (b:BookVersion {_id: $version_id})
-    MERGE (u)-[r:%s]->(b)
-    SET r.rating = $rating,
-        r.days_to_read = $days_to_read,
-        r.read_rate = $read_rate
-    """
-
-    for doc in user_reads:
-        rel_type = rel_map.get(doc.get("current_rstatus"))
-        if not rel_type:
-            continue
-
-        read_rate = doc.get("read_rate_pages") or doc.get("read_rate_hours")
-
-        tx.run(
-            query % rel_type,
-            user_id=doc.get("user_id"),
-            version_id=doc.get("version_id"),
-            rating=doc.get("rating"),
-            days_to_read=doc.get("days_to_read"),
-            read_rate=read_rate
-        )
-
-    logger.info("Created relationships.")
-
-def user_reads_relationships2(tx, user_reads):
-    """
-    Create relationships between users and the books they've read.
+    Create relationships between users and the books they read.
+    
+    TODO: Add counts and switch to average rating, d2r, read_rate
     """
     rel_map = {
         "DNF": "DID_NOT_FINISH",
@@ -199,7 +161,7 @@ def user_reads_relationships2(tx, user_reads):
 
         rows.append({
             "user_id": doc.get("user_id"),
-            "book_id": doc.get("book_id"),
+            "version_id": doc.get("version_id"),
             "rating": doc.get("rating"),
             "days_to_read": doc.get("days_to_read"),
             "read_rate": doc.get("read_rate_pages") or doc.get("read_rate_hours"),
@@ -209,7 +171,7 @@ def user_reads_relationships2(tx, user_reads):
     query = """
     UNWIND $rows AS row
     MATCH (u:User {_id: row.user_id})
-    MATCH (b:Book {_id: row.book_id})
+    MATCH (b:BookVersion {_id: row.version_id})
     CALL apoc.merge.relationship(u, row.rel_type, {}, {}, b) YIELD rel
     SET rel.rating = row.rating,
         rel.days_to_read = row.days_to_read,
@@ -217,6 +179,35 @@ def user_reads_relationships2(tx, user_reads):
     """
 
     tx.run(query, rows=rows)
+    logger.info(f"Created or updated {len(rows)} User-BookVersion relationships.")
 
-    logger.info(f"Created or updated {len(rows)} relationships.")
 
+def user_badges_relationships(tx, users):
+    """
+    Create relationships between users and the badges they earn.
+    """
+    rows = []
+
+    for doc in users:
+        user_id = doc.get("_id")
+        badges = doc.get("badges") or []
+        timestamps = doc.get("badge_timestamps") or []
+
+        # Pair each badge with its timestamp
+        for badge, earned_on in zip(badges, timestamps):
+            rows.append({
+                "user_id": user_id,
+                "badge": badge,
+                "earned_on": earned_on,
+            })
+
+    query = """
+    UNWIND $rows AS row
+    MATCH (u:User {_id: row.user_id})
+    MATCH (b:UserBadge {name: row.badge})
+    MERGE (u)-[rel:HAS_BADGE]->(b)
+    SET rel.earned_on = row.earned_on
+    """
+
+    tx.run(query, rows=rows)
+    logger.info(f"Created or updated {len(rows)} User-Badge relationships.")
