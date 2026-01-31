@@ -89,6 +89,59 @@ def fetch_from_mongo(collection, exclude_fields=None, field_map=None):
     return flattened
 
 
+def fetch_book_awards(db):
+    """
+    Fetch books from MongoDB and return a fully normalised list of dicts:
+      - book_id
+      - award_id
+      - award_name
+      - award_category ("" if missing)
+      - award_year
+      - award_status
+    """
+    books = list(db["books"].find({}))
+    results = []
+
+    for doc in books:
+        book_id = safe_value(doc.get("_id"))
+        awards = doc.get("awards", [])
+
+        for a in awards:
+            results.append({
+                "book_id": book_id,
+                "award_id": safe_value(a.get("_id")),
+                "award_name": a.get("name", ""),
+                "award_category": a.get("category", ""),
+                "award_year": a.get("year"),
+                "award_status": a.get("status", "")
+            })
+
+    return results
+
+
+def generate_award_lists(book_awards):
+    """
+    Generate dict of award lists using book_award records.
+    """
+
+    result = {}
+    u_ids = set(i["book_id"] for i in book_awards)
+
+    for _id in u_ids:
+        awards_list = []
+        award_docs = [i for i in book_awards if i["book_id"] == _id]
+
+        for ad in award_docs:
+            award = ad["award_name"]
+            if ad["award_category"] != "":
+                award = f"{ad["award_name"]} for {ad["award_category"]}"
+            awards_list.append(f"{award}, {ad["award_year"]}, {ad["award_status"]}")
+
+        str_awards = "; ".join(str(i) for i in awards_list)
+        result[_id] = str_awards
+
+    return result
+
 def upsert_nodes(tx, label, rows, id_field="_id"):
     """Generic AuraDB upsert function"""
     query = f"""
@@ -105,6 +158,45 @@ def clear_all_nodes(driver):
     query = "MATCH (n) DETACH DELETE n"
     with driver.session() as session:
         session.run(query)
+
+def cleanup_nodes(driver, label_props: dict, batch_size: int = 5000):
+    """
+    Remove specified properties from nodes of given labels, safely and in batches.
+    """
+    for label, props in label_props.items():
+        logger.info(f"Cleaning up {label} nodes")
+
+        total_nodes_touched = 0
+        removal_counts = {prop: 0 for prop in props}
+
+        for prop in props:
+            while True:
+                query = f"""
+                MATCH (n:{label})
+                WHERE n.{prop} IS NOT NULL
+                WITH n LIMIT $batch_size
+                REMOVE n.{prop}
+                RETURN count(n) AS removed
+                """
+
+                with driver.session() as session:
+                    result = session.run(query, batch_size=batch_size)
+                    removed = result.single()["removed"]
+
+                if removed == 0:
+                    break
+
+                removal_counts[prop] += removed
+                total_nodes_touched += removed
+
+        # Build readable summary
+        removal_summary = ", ".join(
+            f"{prop}={count}" for prop, count in removal_counts.items()
+        )
+
+        logger.success(
+            f"Cleaned up {label}. n_nodes={total_nodes_touched}. Removals: {removal_summary}"
+        )
 
 
 def create_relationships(tx, rel_map, rel: str):
@@ -211,3 +303,43 @@ def user_badges_relationships(tx, users):
 
     tx.run(query, rows=rows)
     logger.info(f"Created or updated {len(rows)} User-Badge relationships.")
+
+
+def book_awards_relationships(tx, award_rows):
+    """
+    Create HAS_AWARD relationships between Books and Awards.
+    Each row must contain:
+      - book_id
+      - award_id
+      - award_name
+      - award_category ("" allowed)
+      - award_year
+      - award_status
+    """
+    rows = []
+
+    for row in award_rows:
+        rows.append({
+            "book_id": row["book_id"],
+            "award_id": row["award_id"],
+            "award_name": row["award_name"],
+            "award_category": row.get("award_category", "") or "",
+            "award_year": row.get("award_year"),
+            "award_status": row.get("award_status", "")
+        })
+
+    query = """
+    UNWIND $rows AS row
+    MATCH (b:Book {_id: row.book_id})
+    MATCH (a:Award {_id: row.award_id})
+    MERGE (b)-[rel:HAS_AWARD]->(a)
+    SET rel.status = row.award_status,
+        rel.year = row.award_year
+        // Only set category if non-empty
+        FOREACH (_ IN CASE WHEN row.award_category <> "" THEN [1] ELSE [] END |
+            SET rel.category = row.award_category
+        )
+    """
+
+    tx.run(query, rows=rows)
+    logger.info(f"Created or updated {len(rows)} Book-Award relationships.")

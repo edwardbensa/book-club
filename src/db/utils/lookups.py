@@ -84,17 +84,17 @@ def resolve_awards(match, lookup_data: dict) -> dict:
     if  match.group(3) == '':
         subdoc = {
             "_id": resolve_lookup('awards', match.group(1), lookup_data),
-            "award_name": match.group(2),
+            "name": match.group(2),
             "year": to_int(match.group(4)),
-            "award_status": match.group(5)
+            "status": match.group(5)
         }
     else:
         subdoc = {
                 "_id": resolve_lookup('awards', match.group(1), lookup_data),
-                "award_name": match.group(2),
-                "award_category": match.group(3),
+                "name": match.group(2),
+                "category": match.group(3),
                 "year": to_int(match.group(4)),
-                "award_status": match.group(5)
+                "status": match.group(5)
             }
 
     return subdoc
