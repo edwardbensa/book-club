@@ -6,14 +6,17 @@ from src.db.utils.transforms import transform_collection
 from src.db.utils.parsers import to_int, to_float, to_array, make_subdocuments
 from src.db.utils.lookups import (load_lookup_data, resolve_lookup, resolve_creator,
                                   resolve_awards, generate_image_url)
+from src.db.utils.connectors import connect_azure_blob
 
+# Blob Service Client
+blobserviceclient_account_name = connect_azure_blob().account_name
 
 # Load and map all lookup collections
 lookup_registry = {
     'creators': {'field': 'creator_id', 'get': ['_id', 'firstname', 'lastname']},
-    'book_series': {'field': 'bseries_name', 'get': ['_id', 'bseries_name']},
+    'book_series': {'field': 'name', 'get': ['_id', 'name']},
     'awards': {'field': 'award_id', 'get': '_id'},
-    'publishers': {'field': 'publisher_name', 'get': ['_id', 'publisher_name']},
+    'publishers': {'field': 'name', 'get': ['_id', 'name']},
     'books': {'field': 'book_id', 'get': '_id'},
 }
 
@@ -82,7 +85,8 @@ def transform_book_versions_func(doc):
         "illustrator": make_subdocuments(doc.get("illustrator"), "creators", subdoc_registry, ','),
         "editors": make_subdocuments(doc.get("editors"), "creators", subdoc_registry, ','),
         "cover_artist": make_subdocuments(doc.get("cover_artist"), "creators", subdoc_registry,','),
-        "cover_url": generate_image_url(doc, doc.get("cover_url"), "cover", "cover-art"),
+        "cover_url": generate_image_url(doc, doc.get("cover_url"), "cover", "cover-art",
+                                        blobserviceclient_account_name),
         "date_added": doc.get("date_added")
     }
 

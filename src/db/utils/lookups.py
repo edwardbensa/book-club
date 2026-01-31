@@ -8,7 +8,6 @@ from loguru import logger
 from src.config import RAW_COLLECTIONS_DIR
 from .parsers import to_int
 from .files import generate_image_filename
-from .connectors import connect_azure_blob
 
 
 # Load lookup collections from disk
@@ -99,9 +98,9 @@ def resolve_awards(match, lookup_data: dict) -> dict:
 
     return subdoc
 
-blobserviceclient_account_name = connect_azure_blob().account_name
 
-def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: str) -> str:
+def generate_image_url(doc: dict, url_str: str, img_type: str,
+                       container_name: str, account_name) -> str:
     """
     Generates the Azure Blob Storage URL for a given document's image.
     """
@@ -115,9 +114,20 @@ def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: s
         extension = os.path.splitext(parsed_url.path)[1] or ".jpg"
 
         blob_name = f"{generate_image_filename(doc, img_type)}{extension}"
-        account_name = blobserviceclient_account_name
         url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}"
         return url
     except (KeyError, TypeError, ValueError) as e:
         logger.error(f"Failed to generate image URL: {e}")
         return ""
+
+
+def find_doc(docs: list, key: str, value) -> dict:
+    """Find single dict in list of dicts
+
+    Search for first dict in docs where the value for 'key' is 'value',
+    Returns an empty dict if no match is found.
+    """
+    for doc in docs:
+        if doc.get(key) == value:
+            return doc
+    return {}

@@ -24,15 +24,15 @@ custom_id_collections = list(collections_to_modify.keys())
 # Collections with ObjectIds in other fields
 objectid_registry = {
     "books": ["series._id", "author._id", "contributors._id", "awards._id"],
-    "book_versions": ["book_id", "publisher._id",],
+    "book_versions": ["book_id", "publisher._id"],
     "club_members": ["club_id", "user_id"],
     "club_member_reads": ["club_id", "book_id", "user_id", "period_id"],
     "club_discussions": ["club_id", "comments.user_id", "created_by", "book_reference"],
     "club_events": ["created_by"],
     "club_reading_periods": ["club_id", "created_by"],
-    "club_period_books": ["club_id", "book_id", "period_id"],
+    "club_period_books": ["club_id", "book_id", "period_id", "votes.user_id"],
     "user_reads": ["book_id", "user_id", "version_id"],
-    "clubs": ["created_by", "club_moderators"],
+    "clubs": ["created_by", "moderators", "badges._id"],
     "users": ["user_badges._id"],
 }
 
@@ -66,10 +66,11 @@ def convert_fields(obj, collection_name: str, path=""):
             else:
                 new_obj[key] = convert_fields(value, collection_name, full_path)
         return new_obj
-    elif isinstance(obj, list):
+
+    if isinstance(obj, list):
         return [convert_fields(item, collection_name, path) for item in obj]
-    else:
-        return obj
+
+    return obj
 
 
 def load_transformed_collections():

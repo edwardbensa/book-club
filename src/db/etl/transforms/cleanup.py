@@ -34,7 +34,7 @@ collections_to_modify = {
 }
 
 collections_to_timestamp = [
-    "book_collections", "genres", "club_event_types", "club_event_statuses",
+    "book_series", "genres", "club_event_types", "club_event_statuses",
     "user_permissions", "user_roles", "publishers", "tags", "awards"
 ]
 

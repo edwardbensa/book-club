@@ -18,7 +18,7 @@ neo4j_driver = connect_auradb()
 books_map = {
     "author": "author.name",
     "author_id": "author._id",
-    "series": "series.bseries_name",
+    "series": "series.name",
     "series_id": "series._id"
 }
 
@@ -34,12 +34,12 @@ bv_map = {
     "contributor": "contributor.name",
     "contributor_id": "contributor._id",
     "publisher_id": "publisher._id",
-    "publisher": "publisher.publisher_name"
+    "publisher": "publisher.name"
     }
 
 user_map = {
     "club_ids": "clubs._id",
-    "badges": "badges.badge_name",
+    "badges": "badges.name",
     "badge_timestamps": "badges.timestamp"
     }
 
@@ -51,7 +51,7 @@ club_map = {
 # Extract from MongoDB
 books = fetch_from_mongo(db["books"], field_map=books_map)
 book_versions = fetch_from_mongo(db["book_versions"], field_map=bv_map)
-book_series = fetch_from_mongo(db["book_series"])
+book_series = fetch_from_mongo(db["book_series"], exclude_fields=["timestamp"])
 genres = fetch_from_mongo(db["genres"], exclude_fields=["timestamp"])
 awards = fetch_from_mongo(db["awards"], exclude_fields=["timestamp"])
 creators = fetch_from_mongo(db["creators"])
@@ -60,6 +60,7 @@ publishers = fetch_from_mongo(db["publishers"], exclude_fields=["timestamp"])
 formats = fetch_from_mongo(db["formats"])
 languages = fetch_from_mongo(db["languages"])
 user_badges = fetch_from_mongo(db["user_badges"])
+club_badges = fetch_from_mongo(db["club_badges"])
 book_awards = fetch_book_awards(db)
 
 excluded_user_fields = [
@@ -68,7 +69,7 @@ excluded_user_fields = [
     "is_admin", "last_active_date"
     ]
 excluded_club_fields = [
-    "club_member_permissions", "join_requests", "club_moderators",
+    "member_permissions", "join_requests", "moderators",
     "created_by", "created_at"
 ]
 users = fetch_from_mongo(db["users"], exclude_fields=excluded_user_fields, field_map=user_map)
@@ -111,7 +112,7 @@ with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "UserBadge", user_badges)
 
 # Edge maps
-book_genre_map = {"labels": ["Book", "Genre"], "props": ["genre", "genre_name"]}
+book_genre_map = {"labels": ["Book", "Genre"], "props": ["genre", "name"]}
 bv_book_map = {"labels": ["BookVersion", "Book"], "props": ["book_id", "_id"]}
 book_series_map = {"labels": ["Book", "BookSeries"], "props": ["series_id", "_id"]}
 book_author_map = {"labels": ["Book", "Creator"], "props": ["author_id", "_id"]}
@@ -120,9 +121,9 @@ bv_cartist_map = {"labels": ["BookVersion", "Creator"], "props": ["cover_artist_
 bv_illustrator_map = {"labels": ["BookVersion", "Creator"], "props": ["illustrator_id", "_id"]}
 bv_translator_map = {"labels": ["BookVersion", "Creator"], "props": ["translator_id", "_id"]}
 bv_publisher_map = {"labels": ["BookVersion", "Publisher"], "props": ["publisher_id", "_id"]}
-bv_language_map = {"labels": ["BookVersion", "Language"], "props": ["language", "language_name"]}
-bv_format_map = {"labels": ["BookVersion", "Format"], "props": ["format", "format_name"]}
-creator_cr_map = {"labels": ["Creator", "CreatorRole"], "props": ["roles", "cr_name"]}
+bv_language_map = {"labels": ["BookVersion", "Language"], "props": ["language", "name"]}
+bv_format_map = {"labels": ["BookVersion", "Format"], "props": ["format", "name"]}
+creator_cr_map = {"labels": ["Creator", "CreatorRole"], "props": ["roles", "name"]}
 user_club_map = {"labels": ["User", "Club"], "props": ["club_ids", "_id"]}
 
 # Create node relationships
@@ -148,8 +149,9 @@ with neo4j_driver.session() as session:
 # Cleanup
 cleanup_dict = {
     "Book": ["author_id", "series_id"],
-    "BookVersion": ["book_id", "publisher_id"],
-    "User": ["club_ids"],
+    "BookVersion": ["book_id", "publisher_id", "narrator_id",
+                    "illustrator_id", "translator_id", "cover_artist_id"],
+    "User": ["club_ids", "badge_timestamps"],
 }
 cleanup_nodes(neo4j_driver, cleanup_dict)
 
