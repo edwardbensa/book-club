@@ -4,7 +4,7 @@
 import re
 import json
 from datetime import datetime
-from src.db.utils.transforms import transform_collection, add_rlog, add_d2r, add_read_rates
+from src.db.utils.transforms import transform_collection, add_read_details
 from src.db.utils.parsers import to_int, make_subdocuments, to_array
 from src.db.utils.lookups import resolve_lookup, load_lookup_data
 from src.db.utils.security import encrypt_pii, hash_password, latest_key_version
@@ -68,20 +68,20 @@ def transform_user_reads_func(doc):
     """
 
     # Modify doc
-    doc = add_rlog(doc)
-    doc = add_d2r(doc)
-    doc = add_read_rates(doc, book_versions)
+    doc = add_read_details(doc, book_versions)
 
     transformed_doc = {
         "_id": doc.get("_id"),
         "user_id": resolve_lookup('users', doc.get("user_id"), lookup_data),
         "version_id": resolve_lookup('book_versions', doc.get("version_id"), lookup_data),
-        "rstatus": resolve_lookup('read_statuses', doc.get("current_rstatus_id"),
-                                          lookup_data),
+        "rstatus": resolve_lookup('read_statuses', doc.get("rstatus_id"), lookup_data),
         "reading_log": make_subdocuments(doc.get("reading_log"), 'reading_log',
                                              subdoc_registry, separator=','),
         "date_started": doc.get("date_started"),
         "date_completed": doc.get("date_completed"),
+        "days_to_read": doc.get("days_to_read"),
+        "pages_per_day": doc.get("pages_per_day"),
+        "hours_per_day": doc.get("hours_per_day"),
         "rating": None if doc.get("rating") == "" else int(doc.get("rating")),
         "notes": doc.get("notes"),
     }
@@ -93,9 +93,8 @@ def transform_user_roles_func(doc):
     Transforms a user_roles document to the desired structure.
     """
     return {
-        "_id": doc.get("_id"),
-        "role_id": doc.get("role_id"),
-        "name": doc.get("role_name"),
+        "_id": doc.get("role_id"),
+        "name": doc.get("name"),
         "permissions": to_array(doc.get("permissions")),
         "description": doc.get("description"),
         "date_added": str(datetime.now())
@@ -137,6 +136,7 @@ def transform_users_func(doc):
         "badges": make_subdocuments(doc.get("badges"), 'badges',
                                              subdoc_registry, separator='|'),
         "preferred_genres": to_array(doc.get("preferred_genres")),
+        "forbidden_genres": to_array(doc.get("forbidden_genres")),
         "clubs": make_subdocuments(doc.get("clubs"), 'clubs',
                                         subdoc_registry, separator='|'),
         "date_joined": doc.get("date_joined"),

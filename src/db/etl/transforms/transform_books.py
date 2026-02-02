@@ -5,7 +5,8 @@ import re
 from src.db.utils.transforms import transform_collection
 from src.db.utils.parsers import to_int, to_float, to_array, make_subdocuments
 from src.db.utils.lookups import (load_lookup_data, resolve_lookup, resolve_creator,
-                                  resolve_awards, generate_image_url)
+                                  resolve_awards)
+from src.db.utils.derived_fields import generate_image_url
 from src.db.utils.connectors import connect_azure_blob
 
 # Blob Service Client

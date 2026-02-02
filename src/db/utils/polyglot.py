@@ -9,13 +9,20 @@ from bson import ObjectId
 
 def safe_value(v):
     """Convert ObjectIds to strings and datetime to ISO format."""
+    if isinstance(v, list):
+        return [safe_value(item) for item in v]
+
+    if isinstance(v, dict):
+        return {k: safe_value(val) for k, val in v.items()}
+
     if isinstance(v, ObjectId):
         return str(v)
+
     if isinstance(v, datetime):
         return v.isoformat()
-    if isinstance(v, str):
-        return v
+
     return v
+
 
 def remove_nested_dicts(entry):
     """Remove keys whose values are dicts or lists of dicts."""
@@ -142,6 +149,99 @@ def generate_award_lists(book_awards):
 
     return result
 
+
+def agg_user_reads(user_reads):
+    """
+    Aggregate user/version reading entries to obtain:
+    - most recent rstatus
+    - most recent start date
+    - most recent read date
+    - read count
+    - avg rating
+    - avg days to read
+    - avg read rate (pages_per_day or hours_per_day)
+    """
+    agg_ur = []
+    version_ids = set(i["version_id"] for i in user_reads)
+    user_ids = set(i["user_id"] for i in user_reads)
+    priority = {"Read": 3, "Reading": 2, "Paused": 1, "To Read": 0}
+
+    for u_id in user_ids:
+        for v_id in version_ids:
+
+            # All entries for this user + version
+            entries = [
+                e for e in user_reads
+                if e["user_id"] == u_id and e["version_id"] == v_id
+            ]
+            if not entries:
+                continue
+
+            # Flatten reading logs
+            logs = []
+            for e in entries:
+                if "reading_log" in e and e["reading_log"]:
+                    logs.extend(e["reading_log"])
+
+            if logs:
+                # Most recent rstatus
+                most_recent_event = max(logs, key=lambda x:
+                                        (x["timestamp"], priority.get(x["rstatus"], -1)))
+                most_recent_rstatus = most_recent_event["rstatus"]
+
+                # Most recent start ("Reading")
+                reading_events = [l for l in logs if l["rstatus"] == "Reading"]
+                most_recent_start = (
+                    max(reading_events, key=lambda x: x["timestamp"])["timestamp"]
+                    if reading_events else None
+                )
+
+                # Most recent read ("Read")
+                read_events = [l for l in logs if l["rstatus"] == "Read"]
+                most_recent_read = (
+                    max(read_events, key=lambda x: x["timestamp"])["timestamp"]
+                    if read_events else None
+                )
+
+                read_count = len(read_events)
+
+            else:
+                # no logs likely means "To Read"
+                most_recent_rstatus = "To Read"
+                most_recent_start = None
+                most_recent_read = None
+                read_count = 0
+
+            # Averages
+            ratings = [e.get("rating") for e in entries if e.get("rating") is not None]
+            avg_rating = sum(ratings) / len(ratings) if ratings else None
+
+            d2r = [e.get("days_to_read") for e in entries if e.get("days_to_read")]
+            avg_days_to_read = sum(d2r) / len(d2r) if d2r else None
+
+            rates = []
+            for e in entries:
+                if "pages_per_day" in e and e["pages_per_day"]:
+                    rates.append(e["pages_per_day"])
+                elif "hours_per_day" in e and e["hours_per_day"]:
+                    rates.append(e["hours_per_day"])
+            avg_read_rate = sum(rates) / len(rates) if rates else None
+
+            agg_ur.append({
+                "user_id": u_id,
+                "version_id": v_id,
+                "most_recent_rstatus": most_recent_rstatus,
+                "most_recent_start": most_recent_start,
+                "most_recent_read": most_recent_read,
+                "read_count": read_count,
+                "avg_rating": avg_rating,
+                "avg_days_to_read": avg_days_to_read,
+                "avg_read_rate": avg_read_rate,
+            })
+
+    return agg_ur
+
+
 def upsert_nodes(tx, label, rows, id_field="_id"):
     """Generic AuraDB upsert function"""
     query = f"""
@@ -158,6 +258,7 @@ def clear_all_nodes(driver):
     query = "MATCH (n) DETACH DELETE n"
     with driver.session() as session:
         session.run(query)
+
 
 def cleanup_nodes(driver, label_props: dict, batch_size: int = 5000):
     """
@@ -233,10 +334,12 @@ def create_relationships(tx, rel_map, rel: str):
 
 def user_reads_relationships(tx, user_reads):
     """
-    Create relationships between users and the books they read.
-    
-    TODO: Add counts and switch to average rating, d2r, read_rate
+    Create relationships between users and the books they read,
+    using aggregated stats from agg_user_reads().
     """
+
+    agg_ur = agg_user_reads(user_reads)
+
     rel_map = {
         "DNF": "DID_NOT_FINISH",
         "Read": "HAS_READ",
@@ -246,18 +349,24 @@ def user_reads_relationships(tx, user_reads):
     }
 
     rows = []
-    for doc in user_reads:
-        rel_type = rel_map.get(doc.get("current_rstatus"))
+    for doc in agg_ur:
+        rstatus = doc.get("most_recent_rstatus")
+        rel_type = rel_map.get(rstatus)
         if not rel_type:
             continue
 
         rows.append({
             "user_id": doc.get("user_id"),
             "version_id": doc.get("version_id"),
-            "rating": doc.get("rating"),
-            "days_to_read": doc.get("days_to_read"),
-            "read_rate": doc.get("read_rate_pages") or doc.get("read_rate_hours"),
-            "rel_type": rel_type
+            "rel_type": rel_type,
+
+            # Optional aggregated properties
+            "most_recent_start": doc.get("most_recent_start"),
+            "most_recent_read": doc.get("most_recent_read"),
+            "read_count": doc.get("read_count"),
+            "avg_rating": doc.get("avg_rating"),
+            "avg_days_to_read": doc.get("avg_days_to_read"),
+            "avg_read_rate": doc.get("avg_read_rate"),
         })
 
     query = """
@@ -265,13 +374,18 @@ def user_reads_relationships(tx, user_reads):
     MATCH (u:User {_id: row.user_id})
     MATCH (b:BookVersion {_id: row.version_id})
     CALL apoc.merge.relationship(u, row.rel_type, {}, {}, b) YIELD rel
-    SET rel.rating = row.rating,
-        rel.days_to_read = row.days_to_read,
-        rel.read_rate = row.read_rate
+    SET
+        rel.most_recent_start = row.most_recent_start,
+        rel.most_recent_read  = row.most_recent_read,
+        rel.read_count        = row.read_count,
+        rel.avg_rating        = row.avg_rating,
+        rel.avg_days_to_read  = row.avg_days_to_read,
+        rel.avg_read_rate     = row.avg_read_rate
     """
 
     tx.run(query, rows=rows)
     logger.info(f"Created or updated {len(rows)} User-BookVersion relationships.")
+
 
 
 def user_badges_relationships(tx, users):

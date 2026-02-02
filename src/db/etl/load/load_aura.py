@@ -44,23 +44,23 @@ user_map = {
     }
 
 club_map = {
-    "badges": "club_badges.badge",
-    "badge_timestamps": "club_badges.timestamp"
+    "badges": "badges.name",
+    "badge_timestamps": "badges.timestamp"
     }
 
 # Extract from MongoDB
-books = fetch_from_mongo(db["books"], field_map=books_map)
+books = fetch_from_mongo(db["books"], field_map=books_map, exclude_fields=["date_added"])
 book_versions = fetch_from_mongo(db["book_versions"], field_map=bv_map)
-book_series = fetch_from_mongo(db["book_series"], exclude_fields=["timestamp"])
-genres = fetch_from_mongo(db["genres"], exclude_fields=["timestamp"])
-awards = fetch_from_mongo(db["awards"], exclude_fields=["timestamp"])
-creators = fetch_from_mongo(db["creators"])
+book_series = fetch_from_mongo(db["book_series"], exclude_fields=["date_added"])
+genres = fetch_from_mongo(db["genres"], exclude_fields=["date_added"])
+awards = fetch_from_mongo(db["awards"], exclude_fields=["date_added"])
+creators = fetch_from_mongo(db["creators"], exclude_fields=["date_added"])
 creator_roles = fetch_from_mongo(db["creator_roles"])
-publishers = fetch_from_mongo(db["publishers"], exclude_fields=["timestamp"])
+publishers = fetch_from_mongo(db["publishers"], exclude_fields=["date_added"])
 formats = fetch_from_mongo(db["formats"])
 languages = fetch_from_mongo(db["languages"])
-user_badges = fetch_from_mongo(db["user_badges"])
-club_badges = fetch_from_mongo(db["club_badges"])
+user_badges = fetch_from_mongo(db["user_badges"], exclude_fields=["date_added"])
+club_badges = fetch_from_mongo(db["club_badges"], exclude_fields=["date_added"])
 book_awards = fetch_book_awards(db)
 
 excluded_user_fields = [
@@ -68,12 +68,10 @@ excluded_user_fields = [
     "dob", "gender", "city", "state",
     "is_admin", "last_active_date"
     ]
-excluded_club_fields = [
-    "member_permissions", "join_requests", "moderators",
-    "created_by", "created_at"
-]
-users = fetch_from_mongo(db["users"], exclude_fields=excluded_user_fields, field_map=user_map)
-clubs = fetch_from_mongo(db["clubs"], exclude_fields=excluded_club_fields)
+excluded_club_fields = ["member_permissions", "join_requests", "moderators", "created_at"]
+
+users = fetch_from_mongo(db["users"], field_map=user_map, exclude_fields=excluded_user_fields)
+clubs = fetch_from_mongo(db["clubs"], field_map=club_map, exclude_fields=excluded_club_fields)
 
 user_reads = fetch_from_mongo(db["user_reads"])
 
@@ -110,6 +108,7 @@ with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "User", users)
     session.execute_write(upsert_nodes, "Club", clubs)
     session.execute_write(upsert_nodes, "UserBadge", user_badges)
+    session.execute_write(upsert_nodes, "ClubBadge", user_badges)
 
 # Edge maps
 book_genre_map = {"labels": ["Book", "Genre"], "props": ["genre", "name"]}

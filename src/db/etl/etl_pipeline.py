@@ -41,7 +41,7 @@ def main():
     Main function to run the ELT pipeline in sequence.
     """
     scripts_to_run = [
-        #"src/db/etl/extract/extract_gsheet.py",
+        "src/db/etl/extract/extract_gsheet.py",
         "src/db/etl/transforms/transform_clubs.py",
         "src/db/etl/transforms/transform_users.py",
         "src/db/etl/transforms/transform_books.py",
@@ -49,8 +49,8 @@ def main():
         "src/db/etl/transforms/transform_awards.py",
         "src/db/etl/utilityscripts/sync_images.py",
         "src/db/etl/transforms/cleanup.py",
-        "src/db/etl/load/load_mongo.py"
-        #"src/db/etl/load/load_aura.py"
+        "src/db/etl/load/load_mongo.py",
+        "src/db/etl/load/load_aura.py"
     ]
 
     for script in scripts_to_run:

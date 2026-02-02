@@ -29,13 +29,12 @@ collections_to_modify = {
     "read_statuses": "rstatus_id",
     "club_event_types": "event_type_id",
     "club_event_statuses": "event_status_id",
-    "user_permissions": "permission_id",
-    "user_roles": "role_id",
+    "user_permissions": "permission_id"
 }
 
 collections_to_timestamp = [
     "book_series", "genres", "club_event_types", "club_event_statuses",
-    "user_permissions", "user_roles", "publishers", "tags", "awards"
+    "user_permissions", "publishers", "tags", "awards"
 ]
 
 if __name__ == "__main__":

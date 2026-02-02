@@ -19,6 +19,7 @@ for name in db.list_collection_names():
     logger.info(f"Dropped collection '{name}'")
 
 # Collections that use custom string-based _id fields
+collections_to_modify["user_roles"] = ""
 custom_id_collections = list(collections_to_modify.keys())
 
 # Collections with ObjectIds in other fields
