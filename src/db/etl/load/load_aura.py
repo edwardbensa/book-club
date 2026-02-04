@@ -4,10 +4,11 @@
 import datetime
 from src.db.utils.security import decrypt_field
 from src.db.utils.connectors import connect_mongodb, connect_auradb
-from src.db.utils.polyglot import (fetch_from_mongo, fetch_book_awards, generate_award_lists,
-                                   upsert_nodes, create_relationships, user_reads_relationships,
-                                   user_badges_relationships, book_awards_relationships,
-                                   cleanup_nodes, clear_all_nodes)
+from src.db.utils.polyglot import (fetch_from_mongo, upsert_nodes, process_books,
+                                   create_relationships, create_badges_relationships,
+                                   user_reads_relationships, book_awards_relationships,
+                                   club_book_relationships, cleanup_nodes, clear_all_nodes
+                                  )
 
 
 # Connect to databases
@@ -61,18 +62,16 @@ formats = fetch_from_mongo(db["formats"])
 languages = fetch_from_mongo(db["languages"])
 user_badges = fetch_from_mongo(db["user_badges"], exclude_fields=["date_added"])
 club_badges = fetch_from_mongo(db["club_badges"], exclude_fields=["date_added"])
-book_awards = fetch_book_awards(db)
+countries = fetch_from_mongo(db["countries"])
 
 excluded_user_fields = [
-    "firstname", "lastname", "email_address", "password",
-    "dob", "gender", "city", "state",
+    "firstname", "lastname", "email_address", "password", "dob", "gender", "city", "state",
     "is_admin", "last_active_date"
     ]
-excluded_club_fields = ["member_permissions", "join_requests", "moderators", "created_at"]
+excluded_club_fields = ["member_permissions", "join_requests", "moderators"]
 
 users = fetch_from_mongo(db["users"], field_map=user_map, exclude_fields=excluded_user_fields)
 clubs = fetch_from_mongo(db["clubs"], field_map=club_map, exclude_fields=excluded_club_fields)
-
 user_reads = fetch_from_mongo(db["user_reads"])
 
 # Add information
@@ -84,12 +83,11 @@ for user in users:
     user["country"] = country
     user.pop("key_version", None)
 
-ba = generate_award_lists(book_awards)
+for creator in creators:
+    lastname = creator.get("lastname", None)
+    creator["name"] = creator["firstname"] + f" {lastname}" if lastname else ""
 
-for book in books:
-    book["awards"] = ba.get(book["_id"])
-    if book["awards"] is None:
-        book.pop("awards")
+books, book_awards = process_books(books)
 
 
 # Upsert nodes to Neo4j
@@ -109,6 +107,7 @@ with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "Club", clubs)
     session.execute_write(upsert_nodes, "UserBadge", user_badges)
     session.execute_write(upsert_nodes, "ClubBadge", user_badges)
+    session.execute_write(upsert_nodes, "Country", countries)
 
 # Edge maps
 book_genre_map = {"labels": ["Book", "Genre"], "props": ["genre", "name"]}
@@ -124,6 +123,10 @@ bv_language_map = {"labels": ["BookVersion", "Language"], "props": ["language", 
 bv_format_map = {"labels": ["BookVersion", "Format"], "props": ["format", "name"]}
 creator_cr_map = {"labels": ["Creator", "CreatorRole"], "props": ["roles", "name"]}
 user_club_map = {"labels": ["User", "Club"], "props": ["club_ids", "_id"]}
+user_country_map = {"labels": ["User", "Country"], "props": ["country", "name"]}
+user_genre_map1 = {"labels": ["User", "Genre"], "props": ["preferred_genres", "name"]}
+user_genre_map2 = {"labels": ["User", "Genre"], "props": ["forbidden_genres", "name"]}
+club_genre_map = {"labels": ["Club", "Genre"], "props": ["preferred_genres", "name"]}
 
 # Create node relationships
 with neo4j_driver.session() as session:
@@ -140,10 +143,16 @@ with neo4j_driver.session() as session:
     session.execute_write(create_relationships, bv_format_map, "HAS_FORMAT")
     session.execute_write(create_relationships, creator_cr_map, "HAS_ROLE")
     session.execute_write(create_relationships, user_club_map, "MEMBER_OF")
+    session.execute_write(create_relationships, user_country_map, "LIVES_IN")
+    session.execute_write(create_relationships, user_genre_map1, "PREFERS_GENRE")
+    session.execute_write(create_relationships, user_genre_map2, "AVOIDS_GENRE")
+    session.execute_write(create_relationships, club_genre_map, "PREFERS_GENRE")
 
     session.execute_write(user_reads_relationships, user_reads)
-    session.execute_write(user_badges_relationships, users)
+    session.execute_write(create_badges_relationships, users, "User")
+    session.execute_write(create_badges_relationships, clubs, "Club")
     session.execute_write(book_awards_relationships, book_awards)
+    session.execute_write(club_book_relationships, db)
 
 # Cleanup
 cleanup_dict = {
@@ -151,6 +160,7 @@ cleanup_dict = {
     "BookVersion": ["book_id", "publisher_id", "narrator_id",
                     "illustrator_id", "translator_id", "cover_artist_id"],
     "User": ["club_ids", "badge_timestamps"],
+    "Club": ["created_by"],
 }
 cleanup_nodes(neo4j_driver, cleanup_dict)
 

@@ -17,3 +17,5 @@ streamlit
 seaborn
 ipykernel
 neo4j~=5.28
+torch
+transformers

@@ -29,7 +29,8 @@ collections_to_modify = {
     "read_statuses": "rstatus_id",
     "club_event_types": "event_type_id",
     "club_event_statuses": "event_status_id",
-    "user_permissions": "permission_id"
+    "user_permissions": "permission_id",
+    "countries": "country_id"
 }
 
 collections_to_timestamp = [

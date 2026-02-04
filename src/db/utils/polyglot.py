@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from loguru import logger
 from bson import ObjectId
+from .embedding import vectorise_text
 
 
 def safe_value(v):
@@ -96,42 +97,39 @@ def fetch_from_mongo(collection, exclude_fields=None, field_map=None):
     return flattened
 
 
-def fetch_book_awards(db):
-    """
-    Fetch books from MongoDB and return a fully normalised list of dicts:
-      - book_id
-      - award_id
-      - award_name
-      - award_category ("" if missing)
-      - award_year
-      - award_status
-    """
-    books = list(db["books"].find({}))
-    results = []
+def fetch_club_period_books(db):
+    """Find the books selected by clubs to read and the selection periods."""
+    cpb = fetch_from_mongo(db["club_period_books"])
+    crp = fetch_from_mongo(db["club_reading_periods"])
 
-    for doc in books:
-        book_id = safe_value(doc.get("_id"))
-        awards = doc.get("awards", [])
+    for i in cpb:
+        i["period_name"] = [k["name"] for k in crp if k["_id"] == i["period_id"]][0]
 
-        for a in awards:
-            results.append({
+    return cpb
+
+
+def process_books(books):
+    """Convert book award data to str and embed descriptions."""
+
+    # Generate list of dicts with book award data
+    book_awards = []
+
+    for book in books:
+        book_id = book.get("_id")
+        awards = book.get("awards", [])
+
+        for award in awards:
+            book_awards.append({
                 "book_id": book_id,
-                "award_id": safe_value(a.get("_id")),
-                "award_name": a.get("name", ""),
-                "award_category": a.get("category", ""),
-                "award_year": a.get("year"),
-                "award_status": a.get("status", "")
+                "award_id": award.get("_id"),
+                "award_name": award.get("name", ""),
+                "award_category": award.get("category", ""),
+                "award_year": award.get("year"),
+                "award_status": award.get("status", "")
             })
 
-    return results
-
-
-def generate_award_lists(book_awards):
-    """
-    Generate dict of award lists using book_award records.
-    """
-
-    result = {}
+    # Convert book awards list to dict by concatenating list members
+    ba_map = {}
     u_ids = set(i["book_id"] for i in book_awards)
 
     for _id in u_ids:
@@ -145,9 +143,27 @@ def generate_award_lists(book_awards):
             awards_list.append(f"{award}, {ad["award_year"]}, {ad["award_status"]}")
 
         str_awards = "; ".join(str(i) for i in awards_list)
-        result[_id] = str_awards
+        ba_map[_id] = str_awards
 
-    return result
+    # Replace awards entries in books with new awards strings
+    for book in books:
+        book["awards"] = ba_map.get(book["_id"], None)
+        if book["awards"] is None:
+            book.pop("awards")
+
+    # Enrich and embed book descriptions
+    for book in books:
+        try:
+            combo = f"Title: {book["title"]}\
+                \n\nAuthor: {", ".join(str(k) for k in book["author"])}\
+                \n\nGenres: {", ".join(str(k) for k in book["genre"])}\
+                \n\nDescription: {book["description"]}"
+            book["description_embedding"] = vectorise_text(combo)
+        except KeyError:
+            logger.warning(f"Description not found for {book["title"]}")
+            continue
+
+    return books, book_awards
 
 
 def agg_user_reads(user_reads):
@@ -212,6 +228,12 @@ def agg_user_reads(user_reads):
                 most_recent_read = None
                 read_count = 0
 
+            # Most recent review
+            try:
+                most_recent_review = [i["notes"] for i in entries][0]
+            except KeyError:
+                most_recent_review = None
+
             # Averages
             ratings = [e.get("rating") for e in entries if e.get("rating") is not None]
             avg_rating = sum(ratings) / len(ratings) if ratings else None
@@ -233,6 +255,7 @@ def agg_user_reads(user_reads):
                 "most_recent_rstatus": most_recent_rstatus,
                 "most_recent_start": most_recent_start,
                 "most_recent_read": most_recent_read,
+                "most_recent_review": most_recent_review,
                 "read_count": read_count,
                 "avg_rating": avg_rating,
                 "avg_days_to_read": avg_days_to_read,
@@ -332,6 +355,42 @@ def create_relationships(tx, rel_map, rel: str):
     logger.info(f"Created {count} relationships of type {rel}")
 
 
+def create_badges_relationships(tx, docs: list, label="User"):
+    """
+    Create relationships between users/clubs and the badges they earn.
+    """
+    if label not in ["User", "Club"]:
+        raise ValueError("Label must be 'User' or 'Club'.")
+
+    source_label = label
+    target_label = "UserBadge" if label == "User" else "ClubBadge"
+
+    rows = []
+
+    for doc in docs:
+        label_id = doc.get("_id")
+        badges = doc.get("badges") or []
+        timestamps = doc.get("badge_timestamps") or []
+
+        for badge, earned_on in zip(badges, timestamps):
+            rows.append({
+                "label_id": label_id,
+                "badge": badge,
+                "earned_on": earned_on,
+            })
+
+    query = f"""
+    UNWIND $rows AS row
+    MATCH (a:{source_label} {{_id: row.label_id}})
+    MATCH (b:{target_label} {{name: row.badge}})
+    MERGE (a)-[rel:HAS_BADGE]->(b)
+    SET rel.earnedOn = row.earned_on
+    """
+
+    tx.run(query, rows=rows)
+    logger.info(f"Created or updated {len(rows)} {source_label}-Badge relationships.")
+
+
 def user_reads_relationships(tx, user_reads):
     """
     Create relationships between users and the books they read,
@@ -363,10 +422,12 @@ def user_reads_relationships(tx, user_reads):
             # Optional aggregated properties
             "most_recent_start": doc.get("most_recent_start"),
             "most_recent_read": doc.get("most_recent_read"),
+            "most_recent_review": doc.get("most_recent_review"),
             "read_count": doc.get("read_count"),
             "avg_rating": doc.get("avg_rating"),
             "avg_days_to_read": doc.get("avg_days_to_read"),
             "avg_read_rate": doc.get("avg_read_rate"),
+            "review": doc.get("notes")
         })
 
     query = """
@@ -375,53 +436,22 @@ def user_reads_relationships(tx, user_reads):
     MATCH (b:BookVersion {_id: row.version_id})
     CALL apoc.merge.relationship(u, row.rel_type, {}, {}, b) YIELD rel
     SET
-        rel.most_recent_start = row.most_recent_start,
-        rel.most_recent_read  = row.most_recent_read,
-        rel.read_count        = row.read_count,
-        rel.avg_rating        = row.avg_rating,
-        rel.avg_days_to_read  = row.avg_days_to_read,
-        rel.avg_read_rate     = row.avg_read_rate
+        rel.mostRecentStart = row.most_recent_start,
+        rel.mostRecentRead  = row.most_recent_read,
+        rel.mostRecentReview = row.most_recent_review,
+        rel.readCount       = row.read_count,
+        rel.avgRating       = row.avg_rating,
+        rel.avgDaysToRead   = row.avg_days_to_read,
+        rel.avgReadRate     = row.avg_read_rate
     """
 
     tx.run(query, rows=rows)
     logger.info(f"Created or updated {len(rows)} User-BookVersion relationships.")
 
 
-
-def user_badges_relationships(tx, users):
-    """
-    Create relationships between users and the badges they earn.
-    """
-    rows = []
-
-    for doc in users:
-        user_id = doc.get("_id")
-        badges = doc.get("badges") or []
-        timestamps = doc.get("badge_timestamps") or []
-
-        # Pair each badge with its timestamp
-        for badge, earned_on in zip(badges, timestamps):
-            rows.append({
-                "user_id": user_id,
-                "badge": badge,
-                "earned_on": earned_on,
-            })
-
-    query = """
-    UNWIND $rows AS row
-    MATCH (u:User {_id: row.user_id})
-    MATCH (b:UserBadge {name: row.badge})
-    MERGE (u)-[rel:HAS_BADGE]->(b)
-    SET rel.earned_on = row.earned_on
-    """
-
-    tx.run(query, rows=rows)
-    logger.info(f"Created or updated {len(rows)} User-Badge relationships.")
-
-
 def book_awards_relationships(tx, award_rows):
     """
-    Create HAS_AWARD relationships between Books and Awards.
+    Create HAS_AWARD relationships between Book and Award labels.
     Each row must contain:
       - book_id
       - award_id
@@ -457,3 +487,36 @@ def book_awards_relationships(tx, award_rows):
 
     tx.run(query, rows=rows)
     logger.info(f"Created or updated {len(rows)} Book-Award relationships.")
+
+
+def club_book_relationships(tx, db):
+    """Create SELECTED_FOR_PERIOD relationships between Club and Book"""
+
+    cpb = fetch_club_period_books(db)
+    rows = []
+
+    for row in cpb:
+        if row["selection_status"] != "selected":
+            continue
+        rows.append({
+        "club_id": row["club_id"],
+        "book_id": row["book_id"],
+        "period": row["period_name"],
+        "startdate": row["period_startdate"],
+        "enddate": row["period_enddate"],
+        "selection_method": row["selection_method"]
+        })
+
+    query = """
+    UNWIND $rows AS row
+    MATCH (c:Club {_id: row.club_id})
+    MATCH (b:Book {_id: row.book_id})
+    MERGE (c)-[rel:SELECTED_FOR_PERIOD]->(b)
+    SET rel.period = row.period,
+        rel.startDate = row.startdate,
+        rel.endDate = row.enddate,
+        rel.selectionMethod = row.selection_method
+    """
+
+    tx.run(query, rows=rows)
+    logger.info(f"Created or updated {len(rows)} Club-Book relationships.")

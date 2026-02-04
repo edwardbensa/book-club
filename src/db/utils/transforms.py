@@ -234,16 +234,19 @@ def add_read_details(doc, book_versions):
         doc.pop("rstatus_history")
         return doc
 
+    version_id = doc.get("version_id")
+    version_doc = find_doc(book_versions, "version_id", version_id)
+
     # Add reading log
     doc["reading_log"] = generate_rlog(doc)
+    logger.info(f"Reading log generated for {version_doc["title"]}.")
 
     # Add days to read
     doc["days_to_read"] = compute_d2r(doc)
+    logger.info(f"D2R computed for {version_doc["title"]}.")
 
     # Add read rate
-    version_id = doc.get("version_id")
-    bv_doc = find_doc(book_versions, "version_id", version_id)
-    metric = "hours" if bv_doc["format"] == "audiobook" else "pages"
+    metric = "hours" if version_doc["format"] == "audiobook" else "pages"
     doc[f"{metric}_per_day"] = compute_rr(doc, book_versions)
 
     doc.pop("rstatus_history")

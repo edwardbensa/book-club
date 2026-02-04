@@ -60,6 +60,7 @@ def transform_books_func(doc):
         "contributors": make_subdocuments(doc.get("contributors"), "creators", subdoc_registry,','),
         "awards": make_subdocuments(doc.get("awards"), "awards", subdoc_registry, separator='|'),
         "tags": to_array(doc.get("tags")),
+        "date_added": doc.get("date_added")
     }
 
 def transform_book_versions_func(doc):
