@@ -1,11 +1,65 @@
 """MongoDB -> AuraDB polyglot persistence utility functions"""
 
 # Imports
+import json
 from collections import defaultdict
 from datetime import datetime
 from loguru import logger
 from bson import ObjectId
-from .embedding import vectorise_text
+from .embedding import vectorise_many
+
+
+collection_label_map = {
+    "books": "Book",
+    "book_versions": "BookVersion",
+    "book_series": "BookSeries",
+    "genres": "Genre",
+    "awards": "Award",
+    "creators": "Creator",
+    "creator_roles": "CreatorRole",
+    "publishers": "Publisher",
+    "formats": "Format",
+    "languages": "Language",
+    "users": "User",
+    "clubs": "Club",
+    "user_badges": "UserBadge",
+    "club_badges": "ClubBadge",
+    "countries": "Country",
+}
+
+
+def load_sync_log(log_path):
+    """Load sync log and last sync time from log file."""
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            sync_log = json.load(f)
+            if not isinstance(sync_log, list):
+                sync_log = []
+    except (FileNotFoundError, json.decoder.JSONDecodeError):
+        sync_log = []
+
+    if sync_log:
+        ts = sync_log[-1].get("timestamp")
+        try:
+            last_sync_time = datetime.fromisoformat(ts)
+        except (TypeError, ValueError):
+            last_sync_time = datetime(2026, 1, 1)
+    else:
+        last_sync_time = datetime(2026, 1, 1)
+
+    return sync_log, last_sync_time
+
+
+def update_sync_log(sync_log, timestamp, log_path):
+    """Save last sync time to sync log."""
+    run = len(sync_log)
+    sync_log.append({
+        "run": run,
+        "timestamp": timestamp.isoformat()
+    })
+
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(sync_log, f, indent=2)
 
 
 def safe_value(v):
@@ -72,28 +126,31 @@ def flatten_document(entry, field_map):
     return entry
 
 
-def fetch_from_mongo(collection, exclude_fields=None, field_map=None):
+def fetch_from_mongo(collection, exclude_fields=None, field_map=None, since=None):
     """
-    Fetch collection from MongoDB with field exclusions
-    Flatten nested dicts
+    Fetch documents updated since 'since' with field exclusions and flattening.
     """
     if exclude_fields is None:
         exclude_fields = []
     if field_map is None:
         field_map = {}
 
+    # Build query
+    query = {"updated_at": {"$gt": since}} if since else {}
     projection = {field: 0 for field in exclude_fields}
-    docs = list(collection.find({}, projection))
+
+    docs = list(collection.find(query, projection))
 
     flattened = []
     for doc in docs:
+        # Use existing safe_value to handle BSON types
         doc = {k: safe_value(v) for k, v in doc.items()}
 
-        # Flatten
+        # Use existing flattening logic
         flat = flatten_document(doc, field_map)
         flattened.append(flat)
-    logger.success(f"Fetched {len(flattened)} documents from {collection.name} collection.")
 
+    logger.success(f"Fetched {len(flattened)} updated documents from {collection.name}.")
     return flattened
 
 
@@ -152,21 +209,31 @@ def process_books(books):
             book.pop("awards")
 
     # Enrich and embed book descriptions
+    descriptions = []
+    valid_books = []
     for book in books:
         try:
-            combo = f"Title: {book["title"]}\
-                \n\nAuthor: {", ".join(str(k) for k in book["author"])}\
-                \n\nGenres: {", ".join(str(k) for k in book["genre"])}\
-                \n\nDescription: {book["description"]}"
-            book["description_embedding"] = vectorise_text(combo)
+            combo = (
+                f"Title: {book["title"]}"
+                f"\n\nAuthor: {", ".join(str(k) for k in book["author"])}"
+                f"\n\nGenres: {", ".join(str(k) for k in book["genre"])}"
+                f"\n\nDescription: {book["description"]}"
+                )
+            descriptions.append(combo)
+            valid_books.append(book)
         except KeyError:
             logger.warning(f"Description not found for {book["title"]}")
             continue
 
+    if descriptions:
+        embeddings = vectorise_many(descriptions)
+        for i, book in enumerate(valid_books):
+            book["description_embedding"] = embeddings[i]
+
     return books, book_awards
 
 
-def agg_user_reads(user_reads):
+def proceess_ur(user_reads):
     """
     Aggregate user/version reading entries to obtain:
     - most recent rstatus
@@ -265,6 +332,34 @@ def agg_user_reads(user_reads):
     return agg_ur
 
 
+def sync_deletions(driver, db, since):
+    """
+    Fetch deletions from MongoDB and remove corresponding nodes in AuraDB.
+    """
+    # Fetch deletions since last sync
+    query = {"deleted_at": {"$gt": since}}
+    deletions = list(db["deletions"].find(query))
+
+    if not deletions:
+        logger.info("No new deletions to sync.")
+        return
+
+    # Group IDs by their Neo4j label using the provided map
+    label_groups = defaultdict(list)
+    for doc in deletions:
+        coll_name = doc.get("original_collection")
+        label = collection_label_map.get(coll_name)
+        if label:
+            label_groups[label].append(str(doc["_id"]))
+
+    # Execute batch deletions in AuraDB
+    with driver.session() as session:
+        for label, ids in label_groups.items():
+            query = f"MATCH (n:{label}) WHERE n._id IN $ids DETACH DELETE n"
+            session.run(query, ids=ids)
+            logger.success(f"Deleted {len(ids)} '{label}' nodes from AuraDB.")
+
+
 def upsert_nodes(tx, label, rows, id_field="_id"):
     """Generic AuraDB upsert function"""
     query = f"""
@@ -281,6 +376,7 @@ def clear_all_nodes(driver):
     query = "MATCH (n) DETACH DELETE n"
     with driver.session() as session:
         session.run(query)
+    logger.info("All nodes and relationships cleared.")
 
 
 def cleanup_nodes(driver, label_props: dict, batch_size: int = 5000):
@@ -323,26 +419,42 @@ def cleanup_nodes(driver, label_props: dict, batch_size: int = 5000):
         )
 
 
-def create_relationships(tx, rel_map, rel: str):
+def ensure_constraints(driver, constraints_map):
     """
-    Create relationships between two sets of nodes in AuraDB.
-    
-    Args:
-        tx: Neo4j session
-        rel_map: Dict of labels [source, target] and properties [source, target]
-        relationship_type: Type of relationship to create (e.g., 'HAS_GENRE')
-    
-    Returns:
-        Number of relationships created
+    Ensure unique constraints exist for all primary identifiers.
     """
-    # Extract node labels and fields
+    with driver.session() as session:
+        for label, prop in constraints_map.items():
+            query = (
+                f"CREATE CONSTRAINT {label.lower()}_{prop}_unique "
+                f"IF NOT EXISTS FOR (n:{label}) REQUIRE n.{prop} IS UNIQUE"
+                )
+            session.run(query)
+            logger.info(f"Verified constraint for {label}({prop})")
+
+
+def create_relationships(tx, rel_map, rel: str, source_docs):
+    """
+    Create relationship between two labels
+    while pruning old relationships for the updated batch.
+    """
+    # Extract node labels, fields, updated source _ids
     source_label = rel_map["labels"][0]
     target_label = rel_map["labels"][1]
     source_prop = rel_map["props"][0]
     target_prop = rel_map["props"][1]
+    updated_ids = [i["_id"] for i in source_docs]
 
+    if not updated_ids:
+        return
+
+    # Delete only the specific relationship type for nodes being updated
     query = f"""
     MATCH (source:{source_label})
+    WHERE source._id IN $ids
+    OPTIONAL MATCH (source)-[old_rel:{rel}]->()
+    DELETE old_rel
+    WITH source
     WHERE source.{source_prop} IS NOT NULL
     UNWIND source.{source_prop} AS value
     MATCH (target:{target_label} {{{target_prop}: value}})
@@ -350,93 +462,94 @@ def create_relationships(tx, rel_map, rel: str):
     RETURN count(*) AS relationships_created
     """
 
-    result = tx.run(query)
+    result = tx.run(query, ids=updated_ids)
     count = result.single()["relationships_created"]
     logger.info(f"Created {count} relationships of type {rel}")
 
 
-def create_badges_relationships(tx, docs: list, label="User"):
+def badges_relationships(tx, docs: list, label="User"):
     """
     Create relationships between users/clubs and the badges they earn.
+    Pruning old relationships to allow for badge removals/corrections.
     """
+    if not docs:
+        return
+
     if label not in ["User", "Club"]:
         raise ValueError("Label must be 'User' or 'Club'.")
 
     source_label = label
     target_label = "UserBadge" if label == "User" else "ClubBadge"
+    updated_ids = [doc["_id"] for doc in docs]
 
+    # Prune all HAS_BADGE relationships for updated nodes
+    prune_query = f"""
+    MATCH (source:{source_label})
+    WHERE source._id IN $ids
+    OPTIONAL MATCH (source)-[r:HAS_BADGE]->()
+    DELETE r
+    """
+    tx.run(prune_query, ids=updated_ids)
+
+    # Merge the current badge list
     rows = []
-
     for doc in docs:
         label_id = doc.get("_id")
         badges = doc.get("badges") or []
         timestamps = doc.get("badge_timestamps") or []
-
         for badge, earned_on in zip(badges, timestamps):
-            rows.append({
-                "label_id": label_id,
-                "badge": badge,
-                "earned_on": earned_on,
-            })
+            rows.append({"label_id": label_id, "badge": badge, "earned_on": earned_on})
 
-    query = f"""
-    UNWIND $rows AS row
-    MATCH (a:{source_label} {{_id: row.label_id}})
-    MATCH (b:{target_label} {{name: row.badge}})
-    MERGE (a)-[rel:HAS_BADGE]->(b)
-    SET rel.earnedOn = row.earned_on
-    """
+    if rows:
+        merge_query = f"""
+        UNWIND $rows AS row
+        MATCH (a:{source_label} {{_id: row.label_id}})
+        MATCH (b:{target_label} {{name: row.badge}})
+        MERGE (a)-[rel:HAS_BADGE]->(b)
+        SET rel.earnedOn = row.earned_on
+        """
+        tx.run(merge_query, rows=rows)
 
-    tx.run(query, rows=rows)
-    logger.info(f"Created or updated {len(rows)} {source_label}-Badge relationships.")
+    logger.info(f"Refreshed {len(rows)} {source_label}-Badge relationships.")
 
 
 def user_reads_relationships(tx, user_reads):
     """
     Create relationships between users and the books they read,
-    using aggregated stats from agg_user_reads().
+    using aggregated stats with pre-cleanup to handle status transitions
     """
-
-    agg_ur = agg_user_reads(user_reads)
+    agg_ur = proceess_ur(user_reads)
+    if not agg_ur:
+        return
 
     rel_map = {
-        "DNF": "DID_NOT_FINISH",
-        "Read": "HAS_READ",
-        "Paused": "HAS_PAUSED",
-        "Reading": "IS_READING",
-        "To Read": "WANTS_TO_READ"
+        "DNF": "DID_NOT_FINISH", "Read": "HAS_READ", "Paused": "HAS_PAUSED",
+        "Reading": "IS_READING", "To Read": "WANTS_TO_READ"
     }
 
     rows = []
     for doc in agg_ur:
-        rstatus = doc.get("most_recent_rstatus")
-        rel_type = rel_map.get(rstatus)
+        rel_type = rel_map.get(doc.get("most_recent_rstatus"))
         if not rel_type:
             continue
 
-        rows.append({
-            "user_id": doc.get("user_id"),
-            "version_id": doc.get("version_id"),
-            "rel_type": rel_type,
+        rows.append({**doc, "rel_type": rel_type})
 
-            # Optional aggregated properties
-            "most_recent_start": doc.get("most_recent_start"),
-            "most_recent_read": doc.get("most_recent_read"),
-            "most_recent_review": doc.get("most_recent_review"),
-            "read_count": doc.get("read_count"),
-            "avg_rating": doc.get("avg_rating"),
-            "avg_days_to_read": doc.get("avg_days_to_read"),
-            "avg_read_rate": doc.get("avg_read_rate"),
-            "review": doc.get("notes")
-        })
+    # Pre-cleanup existing status relationships for these specific user-version pairs
+    cleanup_query = """
+    UNWIND $rows AS row
+    MATCH (u:User {_id: row.user_id})-[r:DID_NOT_FINISH|HAS_READ|HAS_PAUSED|IS_READING|WANTS_TO_READ]->(b:BookVersion {_id: row.version_id})
+    DELETE r
+    """
+    tx.run(cleanup_query, rows=rows)
 
-    query = """
+    # Merge new status relationship
+    merge_query = """
     UNWIND $rows AS row
     MATCH (u:User {_id: row.user_id})
     MATCH (b:BookVersion {_id: row.version_id})
     CALL apoc.merge.relationship(u, row.rel_type, {}, {}, b) YIELD rel
-    SET
-        rel.mostRecentStart = row.most_recent_start,
+    SET rel.mostRecentStart = row.most_recent_start,
         rel.mostRecentRead  = row.most_recent_read,
         rel.mostRecentReview = row.most_recent_review,
         rel.readCount       = row.read_count,
@@ -444,79 +557,85 @@ def user_reads_relationships(tx, user_reads):
         rel.avgDaysToRead   = row.avg_days_to_read,
         rel.avgReadRate     = row.avg_read_rate
     """
+    tx.run(merge_query, rows=rows)
+    logger.info(f"Updated reading status for {len(rows)} User-BookVersion pairs.")
 
-    tx.run(query, rows=rows)
-    logger.info(f"Created or updated {len(rows)} User-BookVersion relationships.")
 
-
-def book_awards_relationships(tx, award_rows):
+def book_awards_relationships(tx, updated_books, award_rows):
     """
     Create HAS_AWARD relationships between Book and Award labels.
-    Each row must contain:
-      - book_id
-      - award_id
-      - award_name
-      - award_category ("" allowed)
-      - award_year
-      - award_status
+    Prune and merge existing relationships to facilitate updates.
     """
-    rows = []
+    if not updated_books:
+        return
 
-    for row in award_rows:
-        rows.append({
-            "book_id": row["book_id"],
-            "award_id": row["award_id"],
-            "award_name": row["award_name"],
-            "award_category": row.get("award_category", "") or "",
-            "award_year": row.get("award_year"),
-            "award_status": row.get("award_status", "")
-        })
-
-    query = """
-    UNWIND $rows AS row
-    MATCH (b:Book {_id: row.book_id})
-    MATCH (a:Award {_id: row.award_id})
-    MERGE (b)-[rel:HAS_AWARD]->(a)
-    SET rel.status = row.award_status,
-        rel.year = row.award_year
-        // Only set category if non-empty
-        FOREACH (_ IN CASE WHEN row.award_category <> "" THEN [1] ELSE [] END |
-            SET rel.category = row.award_category
-        )
+    # Prune existing awards for the books in this batch
+    updated_book_ids = [b["_id"] for b in updated_books]
+    prune_query = """
+    MATCH (b:Book)
+    WHERE b._id IN $ids
+    OPTIONAL MATCH (b)-[r:HAS_AWARD]->()
+    DELETE r
     """
+    tx.run(prune_query, ids=updated_book_ids)
 
-    tx.run(query, rows=rows)
-    logger.info(f"Created or updated {len(rows)} Book-Award relationships.")
+    # Merge new award data
+    if award_rows:
+        merge_query = """
+        UNWIND $rows AS row
+        MATCH (b:Book {_id: row.book_id})
+        MATCH (a:Award {_id: row.award_id})
+        MERGE (b)-[rel:HAS_AWARD]->(a)
+        SET rel.status = row.award_status,
+            rel.year = row.award_year
+            FOREACH (_ IN CASE WHEN row.award_category <> "" THEN [1] ELSE [] END |
+                SET rel.category = row.award_category
+            )
+        """
+        tx.run(merge_query, rows=award_rows)
+
+    logger.info(f"Created or updated {len(updated_book_ids)} Book-Award relationships")
 
 
 def club_book_relationships(tx, db):
-    """Create SELECTED_FOR_PERIOD relationships between Club and Book"""
-
-    cpb = fetch_club_period_books(db)
-    rows = []
-
-    for row in cpb:
-        if row["selection_status"] != "selected":
-            continue
-        rows.append({
-        "club_id": row["club_id"],
-        "book_id": row["book_id"],
-        "period": row["period_name"],
-        "startdate": row["period_startdate"],
-        "enddate": row["period_enddate"],
-        "selection_method": row["selection_method"]
-        })
-
-    query = """
-    UNWIND $rows AS row
-    MATCH (c:Club {_id: row.club_id})
-    MATCH (b:Book {_id: row.book_id})
-    MERGE (c)-[rel:SELECTED_FOR_PERIOD]->(b)
-    SET rel.period = row.period,
-        rel.startDate = row.startdate,
-        rel.endDate = row.enddate,
-        rel.selectionMethod = row.selection_method
     """
+    Create SELECTED_FOR_PERIOD relationships between Club and Book.
+    Refresh club selections by pruning specific club/book/period triples.
+    """
+    cpb = fetch_club_period_books(db)
+    if not cpb:
+        return
 
-    tx.run(query, rows=rows)
-    logger.info(f"Created or updated {len(rows)} Club-Book relationships.")
+    # Prune triples found in the delta
+    prune_rows = [{"club_id": r["club_id"], "book_id": r["book_id"], "period": r["period_name"]}
+                  for r in cpb]
+    prune_query = """
+    UNWIND $rows AS row
+    MATCH (c:Club {_id: row.club_id})-[r:SELECTED_FOR_PERIOD]->(b:Book {_id: row.book_id})
+    WHERE r.period = row.period
+    DELETE r
+    """
+    tx.run(prune_query, rows=prune_rows)
+
+    # Merge only currently 'selected' books
+    merge_rows = []
+    for row in cpb:
+        if row["selection_status"] == "selected":
+            merge_rows.append({
+                "club_id": row["club_id"], "book_id": row["book_id"],
+                "period": row["period_name"], "startdate": row["period_startdate"],
+                "enddate": row["period_enddate"], "selection_method": row["selection_method"]
+            })
+
+    if merge_rows:
+        merge_query = """
+        UNWIND $rows AS row
+        MATCH (c:Club {_id: row.club_id})
+        MATCH (b:Book {_id: row.book_id})
+        MERGE (c)-[rel:SELECTED_FOR_PERIOD]->(b)
+        SET rel.period = row.period, rel.startDate = row.startdate,
+            rel.endDate = row.enddate, rel.selectionMethod = row.selection_method
+        """
+        tx.run(merge_query, rows=merge_rows)
+
+    logger.info(f"Created or updated {len(prune_rows)} Club-Book relationships.")

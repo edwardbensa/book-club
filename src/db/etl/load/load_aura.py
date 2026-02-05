@@ -1,15 +1,24 @@
-"""Upsert data into AuraDB"""
+"""Sync MongoDB data to AuraDB"""
 
 # Imports
+import os
 import datetime
+from loguru import logger
 from src.db.utils.security import decrypt_field
 from src.db.utils.connectors import connect_mongodb, connect_auradb
-from src.db.utils.polyglot import (fetch_from_mongo, upsert_nodes, process_books,
-                                   create_relationships, create_badges_relationships,
-                                   user_reads_relationships, book_awards_relationships,
-                                   club_book_relationships, cleanup_nodes, clear_all_nodes
+from src.db.utils.polyglot import (fetch_from_mongo, upsert_nodes, load_sync_log, update_sync_log,
+                                   ensure_constraints, process_books, create_relationships,
+                                   badges_relationships, user_reads_relationships,
+                                   book_awards_relationships, club_book_relationships,
+                                   cleanup_nodes, sync_deletions
                                   )
+from src.config import ETL_LOGS_DIR
 
+
+# Timestamp and load sync log
+timestamp = datetime.datetime.now()
+SYNC_FILE = os.path.join(ETL_LOGS_DIR,"auradb_sync_log.json")
+sync_log, lst = load_sync_log(SYNC_FILE)
 
 # Connect to databases
 db, mongo = connect_mongodb()
@@ -50,29 +59,29 @@ club_map = {
     }
 
 # Extract from MongoDB
-books = fetch_from_mongo(db["books"], field_map=books_map, exclude_fields=["date_added"])
-book_versions = fetch_from_mongo(db["book_versions"], field_map=bv_map)
-book_series = fetch_from_mongo(db["book_series"], exclude_fields=["date_added", "books"])
-genres = fetch_from_mongo(db["genres"], exclude_fields=["date_added"])
-awards = fetch_from_mongo(db["awards"], exclude_fields=["date_added"])
-creators = fetch_from_mongo(db["creators"], exclude_fields=["date_added"])
-creator_roles = fetch_from_mongo(db["creator_roles"])
-publishers = fetch_from_mongo(db["publishers"], exclude_fields=["date_added"])
-formats = fetch_from_mongo(db["formats"])
-languages = fetch_from_mongo(db["languages"])
-user_badges = fetch_from_mongo(db["user_badges"], exclude_fields=["date_added"])
-club_badges = fetch_from_mongo(db["club_badges"], exclude_fields=["date_added"])
-countries = fetch_from_mongo(db["countries"])
+books = fetch_from_mongo(db["books"], field_map=books_map, since=lst)
+book_versions = fetch_from_mongo(db["book_versions"], field_map=bv_map, since=lst)
+book_series = fetch_from_mongo(db["book_series"], exclude_fields=["books"], since=lst)
+genres = fetch_from_mongo(db["genres"], exclude_fields=["date_added"], since=lst)
+awards = fetch_from_mongo(db["awards"], exclude_fields=["date_added"], since=lst)
+creators = fetch_from_mongo(db["creators"], exclude_fields=["date_added"], since=lst)
+creator_roles = fetch_from_mongo(db["creator_roles"], since=lst)
+publishers = fetch_from_mongo(db["publishers"], exclude_fields=["date_added"], since=lst)
+formats = fetch_from_mongo(db["formats"], since=lst)
+languages = fetch_from_mongo(db["languages"], since=lst)
+user_badges = fetch_from_mongo(db["user_badges"], exclude_fields=["date_added"], since=lst)
+club_badges = fetch_from_mongo(db["club_badges"], exclude_fields=["date_added"], since=lst)
+countries = fetch_from_mongo(db["countries"], since=lst)
 
 excluded_user_fields = [
-    "firstname", "lastname", "email_address", "password", "dob", "gender", "city", "state",
-    "is_admin", "last_active_date"
+    "firstname", "lastname", "email_address", "password", "dob", "gender",
+    "city", "state", "is_admin", "last_active_date"
     ]
 excluded_club_fields = ["member_permissions", "join_requests", "moderators"]
 
-users = fetch_from_mongo(db["users"], field_map=user_map, exclude_fields=excluded_user_fields)
-clubs = fetch_from_mongo(db["clubs"], field_map=club_map, exclude_fields=excluded_club_fields)
-user_reads = fetch_from_mongo(db["user_reads"])
+users = fetch_from_mongo(db["users"], excluded_user_fields, user_map, lst)
+clubs = fetch_from_mongo(db["clubs"], excluded_club_fields, club_map, lst)
+user_reads = fetch_from_mongo(db["user_reads"], since=lst)
 
 # Add information
 current_year = datetime.date.today().year
@@ -89,9 +98,27 @@ for creator in creators:
 
 books, book_awards = process_books(books)
 
+# Set constraints
+constraints_map = {
+        "User": "_id",
+        "Club": "_id",
+        "Book": "_id",
+        "BookVersion": "_id",
+        "Award": "_id",
+        "Creator": "_id",
+        "UserBadge": "name",
+        "ClubBadge": "name",
+        "Genre": "name",
+        "Country": "name",
+        "Format": "name",
+        "Language": "name"
+    }
+ensure_constraints(neo4j_driver, constraints_map)
+
+# Sync deletions
+sync_deletions(neo4j_driver, db, lst)
 
 # Upsert nodes to Neo4j
-clear_all_nodes(neo4j_driver)
 with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "Book", books)
     session.execute_write(upsert_nodes, "BookVersion", book_versions)
@@ -106,7 +133,7 @@ with neo4j_driver.session() as session:
     session.execute_write(upsert_nodes, "User", users)
     session.execute_write(upsert_nodes, "Club", clubs)
     session.execute_write(upsert_nodes, "UserBadge", user_badges)
-    session.execute_write(upsert_nodes, "ClubBadge", user_badges)
+    session.execute_write(upsert_nodes, "ClubBadge", club_badges)
     session.execute_write(upsert_nodes, "Country", countries)
 
 # Edge maps
@@ -130,28 +157,28 @@ club_genre_map = {"labels": ["Club", "Genre"], "props": ["preferred_genres", "na
 
 # Create node relationships
 with neo4j_driver.session() as session:
-    session.execute_write(create_relationships, book_genre_map, "HAS_GENRE")
-    session.execute_write(create_relationships, bv_book_map, "VERSION_OF")
-    session.execute_write(create_relationships, book_series_map, "ENTRY_IN")
-    session.execute_write(create_relationships, book_author_map, "AUTHORED_BY")
-    session.execute_write(create_relationships, bv_narrator_map, "NARRATED_BY")
-    session.execute_write(create_relationships, bv_cartist_map, "COVER_ART_BY")
-    session.execute_write(create_relationships, bv_illustrator_map, "ILLUSTRATION_BY")
-    session.execute_write(create_relationships, bv_translator_map, "TRANSLATED_BY")
-    session.execute_write(create_relationships, bv_publisher_map, "PUBLISHED_BY")
-    session.execute_write(create_relationships, bv_language_map, "HAS_LANGUAGE")
-    session.execute_write(create_relationships, bv_format_map, "HAS_FORMAT")
-    session.execute_write(create_relationships, creator_cr_map, "HAS_ROLE")
-    session.execute_write(create_relationships, user_club_map, "MEMBER_OF")
-    session.execute_write(create_relationships, user_country_map, "LIVES_IN")
-    session.execute_write(create_relationships, user_genre_map1, "PREFERS_GENRE")
-    session.execute_write(create_relationships, user_genre_map2, "AVOIDS_GENRE")
-    session.execute_write(create_relationships, club_genre_map, "PREFERS_GENRE")
+    session.execute_write(create_relationships, book_genre_map, "HAS_GENRE", books)
+    session.execute_write(create_relationships, bv_book_map, "VERSION_OF", book_versions)
+    session.execute_write(create_relationships, book_series_map, "ENTRY_IN", books)
+    session.execute_write(create_relationships, book_author_map, "AUTHORED_BY", books)
+    session.execute_write(create_relationships, bv_narrator_map, "NARRATED_BY", book_versions)
+    session.execute_write(create_relationships, bv_cartist_map, "COVER_ART_BY", book_versions)
+    session.execute_write(create_relationships, bv_illustrator_map, "ILLUSTRATION_BY",book_versions)
+    session.execute_write(create_relationships, bv_translator_map, "TRANSLATED_BY", book_versions)
+    session.execute_write(create_relationships, bv_publisher_map, "PUBLISHED_BY", book_versions)
+    session.execute_write(create_relationships, bv_language_map, "HAS_LANGUAGE", book_versions)
+    session.execute_write(create_relationships, bv_format_map, "HAS_FORMAT", book_versions)
+    session.execute_write(create_relationships, creator_cr_map, "HAS_ROLE", creators)
+    session.execute_write(create_relationships, user_club_map, "MEMBER_OF", users)
+    session.execute_write(create_relationships, user_country_map, "LIVES_IN", users)
+    session.execute_write(create_relationships, user_genre_map1, "PREFERS_GENRE", users)
+    session.execute_write(create_relationships, user_genre_map2, "AVOIDS_GENRE", users)
+    session.execute_write(create_relationships, club_genre_map, "PREFERS_GENRE", clubs)
 
     session.execute_write(user_reads_relationships, user_reads)
-    session.execute_write(create_badges_relationships, users, "User")
-    session.execute_write(create_badges_relationships, clubs, "Club")
-    session.execute_write(book_awards_relationships, book_awards)
+    session.execute_write(badges_relationships, users, "User")
+    session.execute_write(badges_relationships, clubs, "Club")
+    session.execute_write(book_awards_relationships, books, book_awards)
     session.execute_write(club_book_relationships, db)
 
 # Cleanup
@@ -165,3 +192,7 @@ cleanup_dict = {
 cleanup_nodes(neo4j_driver, cleanup_dict)
 
 neo4j_driver.close()
+
+# Update sync log
+update_sync_log(sync_log, timestamp, SYNC_FILE)
+logger.success("Incremental sync completed successfully.")

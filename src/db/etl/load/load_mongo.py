@@ -2,6 +2,7 @@
 
 # Import modules
 import json
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from bson import ObjectId
@@ -33,6 +34,8 @@ objectid_registry = {
     "clubs": ["created_by", "moderators", "badges._id"],
     "users": ["user_badges._id"],
 }
+
+timestamp = datetime.now()
 
 def convert_fields(obj, collection_name: str, path=""):
     """
@@ -70,12 +73,6 @@ def convert_fields(obj, collection_name: str, path=""):
 
     return obj
 
-def drop_all_collections():
-    """Drop all existing collections"""
-    for name in db.list_collection_names():
-        db.drop_collection(name)
-        logger.info(f"Dropped collection '{name}'")
-
 def load_single_collection(file_path):
     """
     Load single transformed collection into MongoDB,
@@ -87,6 +84,7 @@ def load_single_collection(file_path):
             raw_docs = json.load(f)
 
         cleaned_docs = [convert_fields(doc, collection_name) for doc in raw_docs]
+        cleaned_docs = [{**doc, "updated_at": timestamp} for doc in cleaned_docs] # type: ignore
         collection = db[collection_name]
 
         ops = [
@@ -120,7 +118,6 @@ def load_collections():
 
 
 
-# Run the loader
+# Run
 if __name__ == "__main__":
-    # drop_all_collections()
     load_collections()
