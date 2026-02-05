@@ -15,7 +15,6 @@ transformed_collections_to_cleanup = {
 }
 
 raw_collections_to_cleanup = {
-    "book_series": "bseries_id",
     "genres": "genre_id",
     "publishers": "publisher_id",
     "tags": "tag_id",
@@ -34,7 +33,7 @@ collections_to_modify = {
 }
 
 collections_to_timestamp = [
-    "book_series", "genres", "club_event_types", "club_event_statuses",
+    "genres", "club_event_types", "club_event_statuses",
     "user_permissions", "publishers", "tags", "awards"
 ]
 

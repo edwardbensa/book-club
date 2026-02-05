@@ -105,6 +105,7 @@ def transform_user_badges_func(doc):
     Transforms a user_badges document to the desired structure.
     """
     return {
+        "_id": doc.get("_id"),
         "name": doc.get("name"),
         "description": doc.get("description"),
         "date_added": str(datetime.now())

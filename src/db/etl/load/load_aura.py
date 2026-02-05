@@ -52,7 +52,7 @@ club_map = {
 # Extract from MongoDB
 books = fetch_from_mongo(db["books"], field_map=books_map, exclude_fields=["date_added"])
 book_versions = fetch_from_mongo(db["book_versions"], field_map=bv_map)
-book_series = fetch_from_mongo(db["book_series"], exclude_fields=["date_added"])
+book_series = fetch_from_mongo(db["book_series"], exclude_fields=["date_added", "books"])
 genres = fetch_from_mongo(db["genres"], exclude_fields=["date_added"])
 awards = fetch_from_mongo(db["awards"], exclude_fields=["date_added"])
 creators = fetch_from_mongo(db["creators"], exclude_fields=["date_added"])

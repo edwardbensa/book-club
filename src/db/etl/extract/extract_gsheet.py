@@ -1,6 +1,6 @@
 """Google Sheets data extraction"""
 
-# Import modules
+# Imports
 import os
 import json
 import time
