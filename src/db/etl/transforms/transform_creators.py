@@ -1,6 +1,7 @@
 """Transform creators"""
 
 # Imports
+from datetime import datetime
 from src.db.utils.parsers import to_array
 from src.db.utils.transforms import transform_collection
 
@@ -17,7 +18,8 @@ def transform_creators_func(doc):
         "lastname": doc.get("lastname"),
         "bio": doc.get("bio"),
         "website": doc.get("website"),
-        "roles": to_array(doc.get("roles"))
+        "roles": to_array(doc.get("roles")),
+        "date_added": str(datetime.now())
     }
 
 # Run transformation

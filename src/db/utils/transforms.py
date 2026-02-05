@@ -1,13 +1,15 @@
 """Transform utility functions"""
 
-# Import modules
+# Imports
 import os
 import json
 from datetime import datetime
 from pathlib import Path
 from loguru import logger
-from src.db.utils.parsers import clean_document
 from src.config import RAW_COLLECTIONS_DIR, TRANSFORMED_COLLECTIONS_DIR
+from .derived_fields import generate_rlog, compute_d2r, compute_rr, find_doc
+from .parsers import clean_document
+
 
 # pylint: disable=line-too-long
 
@@ -197,7 +199,7 @@ def remove_documents_by_field(collection_name: str, source_directory, field_name
 
 def add_timestamp(collection_name: str):
     """
-    Adds a 'timestamp' field to each document in the specified collection.
+    Adds a 'date_added' field to each document in the specified collection.
     """
     directory = Path(TRANSFORMED_COLLECTIONS_DIR)
     file_path = directory / f"{collection_name}.json"
@@ -209,14 +211,43 @@ def add_timestamp(collection_name: str):
 
         now_str = str(datetime.now())
         for doc in data:
-            doc["timestamp"] = now_str
+            doc["date_added"] = now_str
 
         with file_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        logger.success(f"Added 'timestamp' to all documents in '{collection_name}'")
+        logger.success(f"Added 'date_added' to all documents in '{collection_name}'")
 
     except FileNotFoundError:
         logger.error(f"File not found: {file_path}")
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         logger.error(f"Failed to process '{file_path.name}': {e}")
+
+
+def add_read_details(doc, book_versions):
+    """Add reading log, days to read, and read rates."""
+
+    # Skip if current_rstatus is "To Read"
+    current_rstatus = doc["rstatus_id"]
+    if current_rstatus == "rs4":
+        doc["reading_log"] = ""
+        doc.pop("rstatus_history")
+        return doc
+
+    version_id = doc.get("version_id")
+    version_doc = find_doc(book_versions, "version_id", version_id)
+
+    # Add reading log
+    doc["reading_log"] = generate_rlog(doc)
+    logger.info(f"Reading log generated for {version_doc["title"]}.")
+
+    # Add days to read
+    doc["days_to_read"] = compute_d2r(doc)
+    logger.info(f"D2R computed for {version_doc["title"]}.")
+
+    # Add read rate
+    metric = "hours" if version_doc["format"] == "audiobook" else "pages"
+    doc[f"{metric}_per_day"] = compute_rr(doc, book_versions)
+
+    doc.pop("rstatus_history")
+    return doc

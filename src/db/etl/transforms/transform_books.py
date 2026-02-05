@@ -2,18 +2,24 @@
 
 # Imports
 import re
+import json
 from src.db.utils.transforms import transform_collection
 from src.db.utils.parsers import to_int, to_float, to_array, make_subdocuments
 from src.db.utils.lookups import (load_lookup_data, resolve_lookup, resolve_creator,
-                                  resolve_awards, generate_image_url)
+                                  resolve_awards)
+from src.db.utils.derived_fields import generate_image_url
+from src.db.utils.connectors import connect_azure_blob
+from src.config import RAW_COLLECTIONS_DIR
 
+# Blob Service Client
+blobserviceclient_account_name = connect_azure_blob().account_name
 
 # Load and map all lookup collections
 lookup_registry = {
     'creators': {'field': 'creator_id', 'get': ['_id', 'firstname', 'lastname']},
-    'book_series': {'field': 'bseries_name', 'get': ['_id', 'bseries_name']},
+    'book_series': {'field': 'name', 'get': ['_id', 'name']},
     'awards': {'field': 'award_id', 'get': '_id'},
-    'publishers': {'field': 'publisher_name', 'get': ['_id', 'publisher_name']},
+    'publishers': {'field': 'name', 'get': ['_id', 'name']},
     'books': {'field': 'book_id', 'get': '_id'},
 }
 
@@ -56,6 +62,7 @@ def transform_books_func(doc):
         "contributors": make_subdocuments(doc.get("contributors"), "creators", subdoc_registry,','),
         "awards": make_subdocuments(doc.get("awards"), "awards", subdoc_registry, separator='|'),
         "tags": to_array(doc.get("tags")),
+        "date_added": doc.get("date_added")
     }
 
 def transform_book_versions_func(doc):
@@ -82,10 +89,30 @@ def transform_book_versions_func(doc):
         "illustrator": make_subdocuments(doc.get("illustrator"), "creators", subdoc_registry, ','),
         "editors": make_subdocuments(doc.get("editors"), "creators", subdoc_registry, ','),
         "cover_artist": make_subdocuments(doc.get("cover_artist"), "creators", subdoc_registry,','),
-        "cover_url": generate_image_url(doc, doc.get("cover_url"), "cover", "cover-art"),
+        "cover_url": generate_image_url(doc, doc.get("cover_url"), "cover", "cover-art",
+                                        blobserviceclient_account_name),
+        "date_added": doc.get("date_added")
+    }
+
+with open(RAW_COLLECTIONS_DIR / "books.json", "r", encoding="utf-8") as f:
+    books = json.load(f)
+
+def transform_book_series_func(doc):
+    """
+    Transforms a book_series document to the desired structure.
+    """
+    filtered_books = [b for b in books if b["series"] == doc.get("name")]
+    filtered_books.sort(key=lambda b: b["series_index"])
+    selected = [{"index": to_int(b["series_index"]), "_id": b["_id"]} for b in filtered_books]
+
+    return{
+        "_id": doc.get("_id"),
+        "name": doc.get("name"),
+        "books": selected,
         "date_added": doc.get("date_added")
     }
 
 if __name__ == "__main__":
     transform_collection("books", transform_books_func)
     transform_collection("book_versions", transform_book_versions_func)
+    transform_collection("book_series", transform_book_series_func)

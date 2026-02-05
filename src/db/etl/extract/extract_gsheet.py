@@ -1,6 +1,6 @@
 """Google Sheets data extraction"""
 
-# Import modules
+# Imports
 import os
 import json
 import time
@@ -57,6 +57,8 @@ club_sheets = [
     "club_discussions", "club_events", "club_event_types", "club_event_statuses", "club_badges"
 ]
 
+other = ["countries"]
+
 # Run extraction
 if __name__ == "__main__":
     wipe_directory(RAW_COLLECTIONS_DIR)
@@ -65,4 +67,5 @@ if __name__ == "__main__":
     extract_sheets_to_json(user_sheets)
     time.sleep(10)
     extract_sheets_to_json(club_sheets)
+    extract_sheets_to_json(other)
     logger.success("All raw collections saved to disk.")

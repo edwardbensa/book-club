@@ -15,6 +15,7 @@ neo4j_uri = os.getenv("NEO4J_URI")
 neo4j_user = os.getenv("NEO4J_USERNAME")
 neo4j_pwd = os.getenv("NEO4J_PASSWORD")
 key_registry_path = os.getenv("ENCRYPTION_KEYS")
+hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
 
 
 # Paths

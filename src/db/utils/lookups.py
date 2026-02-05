@@ -3,12 +3,9 @@
 # Import modules
 import os
 import json
-from urllib.parse import urlparse
 from loguru import logger
 from src.config import RAW_COLLECTIONS_DIR
 from .parsers import to_int
-from .files import generate_image_filename
-from .connectors import connect_azure_blob
 
 
 # Load lookup collections from disk
@@ -84,40 +81,30 @@ def resolve_awards(match, lookup_data: dict) -> dict:
     if  match.group(3) == '':
         subdoc = {
             "_id": resolve_lookup('awards', match.group(1), lookup_data),
-            "award_name": match.group(2),
+            "name": match.group(2),
             "year": to_int(match.group(4)),
-            "award_status": match.group(5)
+            "status": match.group(5)
         }
     else:
         subdoc = {
                 "_id": resolve_lookup('awards', match.group(1), lookup_data),
-                "award_name": match.group(2),
-                "award_category": match.group(3),
+                "name": match.group(2),
+                "category": match.group(3),
                 "year": to_int(match.group(4)),
-                "award_status": match.group(5)
+                "status": match.group(5)
             }
 
     return subdoc
 
-blobserviceclient_account_name = connect_azure_blob().account_name
 
-def generate_image_url(doc: dict, url_str: str, img_type: str, container_name: str) -> str:
+def find_doc(docs: list, key: str, value) -> dict:
     """
-    Generates the Azure Blob Storage URL for a given document's image.
+    Find single dict in list of dicts
+
+    Search for first dict in docs where the value for 'key' is 'value',
+    Returns an empty dict if no match is found.
     """
-    if img_type not in ["user", "club", "cover", "creator"]:
-        raise ValueError("Type must be either 'user', 'club', or 'cover'")
-
-    try:
-        if not url_str or not isinstance(url_str, str) or not url_str.strip():
-            return ""
-        parsed_url = urlparse(url_str)
-        extension = os.path.splitext(parsed_url.path)[1] or ".jpg"
-
-        blob_name = f"{generate_image_filename(doc, img_type)}{extension}"
-        account_name = blobserviceclient_account_name
-        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}"
-        return url
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error(f"Failed to generate image URL: {e}")
-        return ""
+    for doc in docs:
+        if doc.get(key) == value:
+            return doc
+    return {}

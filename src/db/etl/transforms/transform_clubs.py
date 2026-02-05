@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from src.db.utils.parsers import to_int, to_array, make_subdocuments
 from src.db.utils.transforms import transform_collection
-from src.db.utils.lookups import load_lookup_data
+from src.db.utils.lookups import load_lookup_data, resolve_lookup
 
 # Define lookup registry
 lookup_registry = {
@@ -13,7 +13,8 @@ lookup_registry = {
     "users": {"field": "user_id", "get": "_id"},
     "clubs": {"field": "club_id", "get": "_id"},
     "club_reading_periods": {"field": "period_id", "get": "_id"},
-    "genres": {"field": "genre_name", "get": ["_id", "genre_name"]}
+    "genres": {"field": "genre_name", "get": ["_id", "name"]},
+    'club_badges': {'field': 'name', 'get': ['_id', 'name']},
 }
 
 # Load lookup data
@@ -49,6 +50,13 @@ subdoc_registry = {
             "timestamp": match.group(2)
         }
     },
+    'badges': {
+        'pattern': re.compile(r'badge:\s*(.+?),\s*timestamp:\s*(\d{4}-\d{2}-\d{2})'),
+        'transform': lambda match: {
+            **resolve_lookup('club_badges', match.group(1), lookup_data), # type: ignore
+            "timestamp": match.group(2)
+        }
+    },
 }
 
 # Transformation functions
@@ -62,8 +70,7 @@ def transform_club_members_func(doc):
         "user_id": lookup_data["users"].get(doc.get("user_id")),
         "role": doc.get("role"),
         "date_joined": doc.get("date_joined"),
-        "is_active": doc.get("is_active"),
-        "created_at": str(datetime.now())
+        "is_active": doc.get("is_active") == "TRUE",
     }
 
 def transform_club_member_reads_func(doc):
@@ -77,7 +84,7 @@ def transform_club_member_reads_func(doc):
         "book_id": lookup_data["books"].get(doc.get("book_id")),
         "period_id": lookup_data["club_reading_periods"].get(doc.get("period_id")),
         "read_date": doc.get("read_date"),
-        "created_at": str(datetime.now())
+        "timestamp": str(datetime.now())
     }
 
 def transform_club_period_books_func(doc):
@@ -97,7 +104,7 @@ def transform_club_period_books_func(doc):
         "votes_startdate": doc.get("votes_startdate"),
         "votes_enddate": doc.get("votes_enddate"),
         "selection_status": doc.get("selection_status"),
-        "created_at": str(datetime.now())
+        "date_added": str(datetime.now())
     }
 
 def transform_club_discussions_func(doc):
@@ -110,7 +117,7 @@ def transform_club_discussions_func(doc):
         "topic_name": doc.get("topic_name"),
         "topic_description": doc.get("topic_description"),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
-        "created_at": doc.get("created_at"),
+        "timestamp": doc.get("timestamp"),
         "comments": make_subdocuments(doc.get("comments"), "club_discussions",
                                       subdoc_registry, separator="|"),
         "book_reference": lookup_data["books"].get(doc.get("book_reference"))
@@ -123,14 +130,14 @@ def transform_club_events_func(doc):
     return {
         "_id": doc.get("_id"),
         "club_id": lookup_data["clubs"].get(doc.get("club_id")),
-        "event_name": doc.get("event_name"),
-        "event_description": doc.get("event_description"),
-        "event_type": doc.get("event_type"),
-        "event_startdate": doc.get("event_startdate"),
-        "event_enddate": doc.get("event_enddate"),
-        "event_status": doc.get("event_status"),
+        "name": doc.get("name"),
+        "description": doc.get("description"),
+        "type": doc.get("type"),
+        "startdate": doc.get("startdate"),
+        "enddate": doc.get("enddate"),
+        "status": doc.get("status"),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
-        "created_at": str(datetime.now())
+        "date_added": str(datetime.now())
     }
 
 def transform_club_reading_periods_func(doc):
@@ -140,14 +147,25 @@ def transform_club_reading_periods_func(doc):
     return {
         "_id": doc.get("_id"),
         "club_id": lookup_data["clubs"].get(doc.get("club_id")),
-        "period_name": doc.get("period_name"),
-        "period_description": doc.get("period_description"),
-        "period_startdate": doc.get("period_startdate"),
-        "period_enddate": doc.get("period_enddate"),
-        "period_status": doc.get("period_status"),
+        "name": doc.get("name"),
+        "description": doc.get("description"),
+        "startdate": doc.get("startdate"),
+        "enddate": doc.get("enddate"),
+        "status": doc.get("status"),
         "max_books": to_int(doc.get("max_books")),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
-        "created_at": str(datetime.now())
+        "date_added": str(datetime.now())
+    }
+
+def transform_club_badges_func(doc):
+    """
+    Transforms a user_badges document to the desired structure.
+    """
+    return {
+        "_id": doc.get("_id"),
+        "name": doc.get("name"),
+        "description": doc.get("description"),
+        "date_added": str(datetime.now())
     }
 
 def transform_clubs_func(doc):
@@ -156,21 +174,20 @@ def transform_clubs_func(doc):
     """
     return {
         "_id": doc.get("_id"),
-        "club_handle": doc.get("club_handle"),
-        "club_name": doc.get("club_name"),
-        "club_creationdate": doc.get("club_creationdate"),
-        "club_genres": to_array(doc.get("club_genres")),
-        "club_description": doc.get("club_description"),
-        "club_visibility": doc.get("club_visibility"),
-        "club_rules": doc.get("club_rules"),
-        "club_moderators": [lookup_data["users"].get(user) for user
-                            in to_array(doc.get("club_moderators"))],
-        "club_badges": doc.get("club_badges"),
-        "club_member_permissions": to_array(doc.get("club_member_permissions")),
+        "handle": doc.get("handle"),
+        "name": doc.get("name"),
+        "creationdate": doc.get("creationdate"),
+        "preferred_genres": to_array(doc.get("preferred_genres")),
+        "description": doc.get("description"),
+        "visibility": doc.get("visibility"),
+        "rules": doc.get("rules"),
+        "moderators": [lookup_data["users"].get(user) for user
+                            in to_array(doc.get("moderators"))],
+        "badges": make_subdocuments(doc.get("badges"), 'badges', subdoc_registry, separator='|'),
+        "member_permissions": to_array(doc.get("member_permissions")),
         "join_requests": make_subdocuments(doc.get("join_requests"), "join_requests",
                                            subdoc_registry, separator=";"),
         "created_by": lookup_data["users"].get(doc.get("created_by")),
-        "created_at": str(datetime.now())
     }
 
 # Run all transformations
@@ -181,4 +198,5 @@ if __name__ == "__main__":
     transform_collection("club_discussions", transform_club_discussions_func)
     transform_collection("club_events", transform_club_events_func)
     transform_collection("club_reading_periods", transform_club_reading_periods_func)
+    transform_collection("club_badges", transform_club_badges_func)
     transform_collection("clubs", transform_clubs_func)
